@@ -1,0 +1,9 @@
+[submodule "FreeRTOS-Kernel"]
+	path = FreeRTOS-Kernel
+	url = https://github.com/FreeRTOS/FreeRTOS-Kernel.git
+[submodule "stm32f10x-stdperiph-lib"]
+	path = stm32f10x-stdperiph-lib
+	url = https://github.com/thanhduong8457/stm32f10x-stdperiph-lib.git
+[submodule "STM32F4_Driver"]
+	path = STM32F4_Driver
+	url = https://github.com/thanhduong8457/STM32F4_Driver.git
