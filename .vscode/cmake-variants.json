@@ -1,0 +1,36 @@
+{
+    "buildType": {
+        "default": "debug",
+        "choices": {
+            "debug": {
+                "short": "Debug",
+                "long": "Debug build",
+                "buildType": "Debug"
+            },
+            "release": {
+                "short": "Release",
+                "long": "Release build",
+                "buildType": "Release"
+            }
+        }
+    },
+    "target": {
+        "default": "stm32f1",
+        "choices": {
+            "stm32f1": {
+                "short": "STM32F1",
+                "long": "STM32F103 target",
+                "settings": {
+                    "STM32_TARGET": "stm32f1"
+                }
+            },
+            "stm32f4": {
+                "short": "STM32F4",
+                "long": "STM32F407 target",
+                "settings": {
+                    "STM32_TARGET": "stm32f4"
+                }
+            }
+        }
+    }
+}

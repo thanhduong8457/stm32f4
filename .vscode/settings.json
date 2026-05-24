@@ -1,17 +1,19 @@
 {
-    "cortex-debug.gdbPath": "arm-none-eabi-gdb",
-    "cortex-debug.stutilPath": "st-util",
+    "cmake.configureOnOpen": false,
+    "cmake.buildDirectory": "${workspaceFolder}/build-${variant:target}",
     "cmake.configureArgs": [
-        "-Bbuild",
-        "-DCMAKE_TOOLCHAIN_FILE=gcc-arm-none-eabi.cmake",
-        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-        "-DFREERTOS_CONFIG_FILE_DIRECTORY=/Users/thanhduong/Documents/Embeded_Project/STM32/stm32_project/STM32_F4/CmakeProject/adas_mcu_dev/src/FreeRTOSConfig.h",
-        "-DFREERTOS_PORT=CCS_ARM_CM3"
+        "-DCMAKE_TOOLCHAIN_FILE=${workspaceFolder}/gcc-arm-none-eabi.cmake",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
     ],
+    "cortex-debug.gdbPath": "arm-none-eabi-gdb",
+    "cortex-debug.openocdPath": "openocd",
+    "cortex-debug.stutilPath": "st-util",
     "files.associations": {
+        "freertos.h": "c",
+        "freertosconfig.h": "c",
         "portable.h": "c",
         "portmacro.h": "c",
-        "freertosconfig.h": "c",
-        "freertos.h": "c"
+        "queue.h": "c",
+        "task.h": "c"
     }
 }
