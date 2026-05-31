@@ -23,11 +23,11 @@ private:
     hal::IUartRxSink *rxSink_ = nullptr;
 };
 
-class Tim4Channel4Servo final : public hal::IServoOutput
+class Tim4Channel4Pwm final : public hal::IPwmOutput
 {
 public:
     void initialize() override;
-    void setAngleDegrees(uint8_t angleDegrees) override;
+    void setDutyCyclePermille(uint16_t dutyPermille) override;
 };
 
 class Tim3Encoder final : public hal::IEncoder

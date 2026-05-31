@@ -4,7 +4,7 @@ STM32 FreeRTOS firmware refactored into a C++ object-oriented architecture with 
 
 ## Layout
 
-- `include/app`, `src/app`: application managers and tasks
+- `src/app`: application managers, PID controller, runtime configuration, and tasks
 - `include/hal`: hardware-facing C++ interfaces
 - `include/middleware`: FreeRTOS helper wrappers
 - `platform/stm32f1`: STM32F103 startup, linker script, board composition, StdPeriph drivers
@@ -16,7 +16,7 @@ STM32 FreeRTOS firmware refactored into a C++ object-oriented architecture with 
 | Pin | Function |
 | --- | --- |
 | PC13 | Status LED |
-| PB9 | TIM4 CH4 servo/PWM output |
+| PB9 | TIM4 CH4 motor PWM duty output |
 | PA9 | USART1 TX, 115200 8N1 |
 | PA10 | USART1 RX, 115200 8N1 |
 | PA6 | TIM3 CH1 encoder A |
@@ -27,7 +27,7 @@ STM32 FreeRTOS firmware refactored into a C++ object-oriented architecture with 
 | Pin | Function |
 | --- | --- |
 | PC13 | Status LED |
-| PB9 | TIM4 CH4 servo/PWM output, GPIO AF2 |
+| PB9 | TIM4 CH4 motor PWM duty output, GPIO AF2 |
 | PA9 | USART1 TX, 115200 8N1, GPIO AF7 |
 | PA10 | USART1 RX, 115200 8N1, GPIO AF7 |
 | PA6 | TIM3 CH1 encoder A, GPIO AF2 |
@@ -56,13 +56,51 @@ exit
 Supported service-mode commands:
 
 ```text
-SET <0..180>  Set the motor target angle in degrees.
-STOP          Disable motor output and clear the target.
-STATUS        Print current target, enabled state, encoder position, and delta.
+SET RPM <0..10000>         Set target motor speed.
+SET KP <0.000..100.000>   Set proportional gain.
+SET KI <0.000..100.000>   Set integral gain.
+SET KD <0.000..100.000>   Set derivative gain.
+SET SAMPLE_TIME <5..1000> Set encoder/PID loop period in ms.
+GET RPM                   Read target RPM.
+GET KP                    Read proportional gain.
+GET KI                    Read integral gain.
+GET KD                    Read derivative gain.
+GET SAMPLE_TIME           Read sample/control period.
+SAVE CONFIG               Save active parameters to the runtime config shadow.
+LOAD CONFIG               Load parameters from the runtime config shadow.
+RESET PID                 Clear PID integral, derivative, and soft-start state.
+STATUS                    Print RPM, duty, direction, PID, encoder, and state.
+STOP                      Disable motor output and clear target RPM.
 ```
 
 Commands are validated before changes are applied. Invalid syntax, out-of-range
 targets, or a busy application queue return an `ERR ...` response.
+
+## Encoder And Control Loop
+
+TIM3 runs in hardware quadrature encoder mode on both STM32F1 and STM32F4
+targets using PA6 as Encoder A and PA7 as Encoder B. `EncoderManager` samples
+the 16-bit timer count with wrap-safe deltas and maintains a signed cumulative
+pulse count.
+
+RPM is calculated every `SAMPLE_TIME` milliseconds:
+
+```text
+rpm = abs(delta_counts) * 60000 / (encoder_counts_per_revolution * sample_time_ms)
+```
+
+Direction is `CW` for positive deltas, `CCW` for negative deltas, and `STOPPED`
+when no pulses arrive during the sample. The default encoder scale is
+`1024` counts per revolution in `src/app/app_config.hpp`.
+
+`MotorController` owns the deterministic speed loop. It drains command messages
+without blocking, runs the PID update with `vTaskDelayUntil`, soft-starts target
+RPM when enabled, saturates output to `0..1000` duty permille, and writes only
+PWM duty updates to TIM4 CH4.
+
+`SAVE CONFIG` and `LOAD CONFIG` use `ConfigurationManager`'s RAM-backed shadow
+store. The storage API is isolated so a target-specific Flash/EEPROM backend can
+replace the volatile shadow later.
 
 ## LED Behavior
 
@@ -76,14 +114,24 @@ targets, or a busy application queue return an `ERR ...` response.
 ```text
 > SERVICE MODE
 < OK service mode entered
-> SET 90
-< OK target accepted
-> SET 220
-< ERR target range 0..180
+> SET RPM 1500
+< OK
+> SET KP 1.2
+< OK
+> SET KI 0.08
+< OK
+> SET KD 0.02
+< OK
+> GET KP
+< KP 1.200
+> SET SAMPLE_TIME 20
+< OK
 > STATUS
-< STATUS target=90 enabled=1 encoder=0 delta=0
+< STATUS current_rpm=0 target_rpm=1500 pwm_duty=0 direction=STOPPED kp=1.200 ki=0.080 kd=0.020 pid_output=0 encoder_count=0 controller=ENABLED
+> SAVE CONFIG
+< OK
 > STOP
-< OK motor stopped
+< OK
 > exit
 < OK service mode exited
 ```

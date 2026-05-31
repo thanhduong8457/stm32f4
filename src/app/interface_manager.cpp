@@ -10,8 +10,8 @@
 #include "task.h"
 
 #include "app/app_config.hpp"
-#include "app/ui_manager.hpp"
 #include "app/ceo.hpp"
+#include "app/ui_manager.hpp"
 
 namespace app
 {
@@ -25,6 +25,8 @@ void trimLeadingSpaces(const char *&text)
         ++text;
     }
 }
+
+bool hasOnlyTrailingSpaces(const char *text);
 
 bool parseInteger(const char *text, int32_t &value)
 {
@@ -51,6 +53,53 @@ bool parseInteger(const char *text, int32_t &value)
     return true;
 }
 
+bool parseFixedMilli(const char *text, int32_t &value)
+{
+    trimLeadingSpaces(text);
+
+    int64_t whole = 0;
+    bool hasDigit = false;
+    while (std::isdigit(static_cast<unsigned char>(*text)) != 0)
+    {
+        hasDigit = true;
+        whole = (whole * 10) + (*text - '0');
+        ++text;
+    }
+
+    int32_t fraction = 0;
+    int32_t scale = config::kPidGainScale / 10;
+    if (*text == '.')
+    {
+        ++text;
+        while (scale > 0 && std::isdigit(static_cast<unsigned char>(*text)) != 0)
+        {
+            hasDigit = true;
+            fraction += (*text - '0') * scale;
+            scale /= 10;
+            ++text;
+        }
+
+        if (std::isdigit(static_cast<unsigned char>(*text)) != 0)
+        {
+            return false;
+        }
+    }
+
+    if (!hasDigit || !hasOnlyTrailingSpaces(text))
+    {
+        return false;
+    }
+
+    const int64_t parsed = (whole * config::kPidGainScale) + fraction;
+    if (parsed > std::numeric_limits<int32_t>::max())
+    {
+        return false;
+    }
+
+    value = static_cast<int32_t>(parsed);
+    return true;
+}
+
 bool hasOnlyTrailingSpaces(const char *text)
 {
     while (*text != '\0')
@@ -70,6 +119,13 @@ bool isCommandLine(const char *text, const char *command)
     const size_t commandLength = std::strlen(command);
     return std::strncmp(text, command, commandLength) == 0 &&
            hasOnlyTrailingSpaces(text + commandLength);
+}
+
+bool startsWithCommand(const char *text, const char *command)
+{
+    const size_t commandLength = std::strlen(command);
+    return std::strncmp(text, command, commandLength) == 0 &&
+           std::isspace(static_cast<unsigned char>(text[commandLength])) != 0;
 }
 
 } // namespace
@@ -211,18 +267,74 @@ void InterfaceManager::dispatchServiceCommand(const char *packet)
     const char *cursor = packet;
     SystemMessage message{SystemCommand::InvalidCommand, MessageSource::Interface, 0};
 
-    if (std::strncmp(cursor, "SET", 3) == 0 &&
-        std::isspace(static_cast<unsigned char>(cursor[3])) != 0)
+    if (startsWithCommand(cursor, "SET"))
     {
         cursor += 3;
         trimLeadingSpaces(cursor);
-        if (!parseInteger(cursor, message.value))
+
+        if (startsWithCommand(cursor, "RPM"))
         {
-            sendResponse("ERR bad SET value\r\n");
+            cursor += 3;
+            trimLeadingSpaces(cursor);
+            if (!parseInteger(cursor, message.value))
+            {
+                sendResponse("ERR bad RPM value\r\n");
+                reportSettingFailure();
+                return;
+            }
+            message.cmd = SystemCommand::SetTargetRpm;
+        }
+        else if (startsWithCommand(cursor, "KP"))
+        {
+            cursor += 2;
+            if (!parseFixedMilli(cursor, message.value))
+            {
+                sendResponse("ERR bad KP value\r\n");
+                reportSettingFailure();
+                return;
+            }
+            message.cmd = SystemCommand::SetKp;
+        }
+        else if (startsWithCommand(cursor, "KI"))
+        {
+            cursor += 2;
+            if (!parseFixedMilli(cursor, message.value))
+            {
+                sendResponse("ERR bad KI value\r\n");
+                reportSettingFailure();
+                return;
+            }
+            message.cmd = SystemCommand::SetKi;
+        }
+        else if (startsWithCommand(cursor, "KD"))
+        {
+            cursor += 2;
+            if (!parseFixedMilli(cursor, message.value))
+            {
+                sendResponse("ERR bad KD value\r\n");
+                reportSettingFailure();
+                return;
+            }
+            message.cmd = SystemCommand::SetKd;
+        }
+        else if (startsWithCommand(cursor, "SAMPLE_TIME"))
+        {
+            cursor += 11;
+            trimLeadingSpaces(cursor);
+            if (!parseInteger(cursor, message.value))
+            {
+                sendResponse("ERR bad SAMPLE_TIME value\r\n");
+                reportSettingFailure();
+                return;
+            }
+            message.cmd = SystemCommand::SetSampleTime;
+        }
+        else
+        {
+            sendResponse("ERR unsupported SET command\r\n");
             reportSettingFailure();
             return;
         }
-        message.cmd = SystemCommand::SetMotorTarget;
     }
     else if (isCommandLine(cursor, "STOP"))
     {
@@ -231,6 +343,49 @@ void InterfaceManager::dispatchServiceCommand(const char *packet)
     else if (isCommandLine(cursor, "STATUS"))
     {
         message.cmd = SystemCommand::StatusRequest;
+    }
+    else if (startsWithCommand(cursor, "GET"))
+    {
+        cursor += 3;
+        trimLeadingSpaces(cursor);
+        if (isCommandLine(cursor, "RPM"))
+        {
+            message.cmd = SystemCommand::GetTargetRpm;
+        }
+        else if (isCommandLine(cursor, "KP"))
+        {
+            message.cmd = SystemCommand::GetKp;
+        }
+        else if (isCommandLine(cursor, "KI"))
+        {
+            message.cmd = SystemCommand::GetKi;
+        }
+        else if (isCommandLine(cursor, "KD"))
+        {
+            message.cmd = SystemCommand::GetKd;
+        }
+        else if (isCommandLine(cursor, "SAMPLE_TIME"))
+        {
+            message.cmd = SystemCommand::GetSampleTime;
+        }
+        else
+        {
+            sendResponse("ERR unsupported GET command\r\n");
+            reportSettingFailure();
+            return;
+        }
+    }
+    else if (isCommandLine(cursor, "SAVE CONFIG"))
+    {
+        message.cmd = SystemCommand::SaveConfig;
+    }
+    else if (isCommandLine(cursor, "LOAD CONFIG"))
+    {
+        message.cmd = SystemCommand::LoadConfig;
+    }
+    else if (isCommandLine(cursor, "RESET PID"))
+    {
+        message.cmd = SystemCommand::ResetPid;
     }
     else
     {

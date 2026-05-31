@@ -48,23 +48,16 @@ void blinkTaskEntry(void *parameters)
 
 } // namespace
 
-Application::Application(CEO &director,
-                         InterfaceManager &interface,
-                         MotorController &motor,
-                         EncoderManager &encoder,
-                         UIManager &blink)
-    : director_(director),
-      interface_(interface),
-      motor_(motor),
-      encoder_(encoder),
-      blink_(blink)
+Application::Application(CEO &director, InterfaceManager &interface, MotorController &motor,
+                         EncoderManager &encoder, UIManager &blink)
+    : director_(director), interface_(interface), motor_(motor), encoder_(encoder), blink_(blink)
 {
 }
 
 void Application::initialize()
 {
     blink_.initialize();
-    director_.initialize(blink_);
+    director_.initialize(blink_, encoder_);
     interface_.initialize(director_, blink_);
     motor_.initialize();
     encoder_.initialize(director_);
@@ -72,36 +65,16 @@ void Application::initialize()
 
 bool Application::createTasks()
 {
-    return xTaskCreate(directorTaskEntry,
-                       "Director",
-                       config::kDirectorTaskStackWords,
-                       this,
-                       config::kDirectorTaskPriority,
-                       nullptr) == pdPASS &&
-           xTaskCreate(interfaceTaskEntry,
-                       "Iface",
-                       config::kInterfaceTaskStackWords,
-                       this,
-                       config::kInterfaceTaskPriority,
-                       nullptr) == pdPASS &&
-           xTaskCreate(motorTaskEntry,
-                       "Motor",
-                       config::kMotorTaskStackWords,
-                       this,
-                       config::kMotorTaskPriority,
-                       nullptr) == pdPASS &&
-           xTaskCreate(encoderTaskEntry,
-                       "Encoder",
-                       config::kEncoderTaskStackWords,
-                       this,
-                       config::kEncoderTaskPriority,
-                       nullptr) == pdPASS &&
-           xTaskCreate(blinkTaskEntry,
-                       "Blink",
-                       config::kUIManagerStackWords,
-                       this,
-                       config::kUIManagerPriority,
-                       nullptr) == pdPASS;
+    return xTaskCreate(directorTaskEntry, "Director", config::kDirectorTaskStackWords, this,
+                       config::kDirectorTaskPriority, nullptr) == pdPASS &&
+           xTaskCreate(interfaceTaskEntry, "Iface", config::kInterfaceTaskStackWords, this,
+                       config::kInterfaceTaskPriority, nullptr) == pdPASS &&
+           xTaskCreate(motorTaskEntry, "Motor", config::kMotorTaskStackWords, this,
+                       config::kMotorTaskPriority, nullptr) == pdPASS &&
+           xTaskCreate(encoderTaskEntry, "Encoder", config::kEncoderTaskStackWords, this,
+                       config::kEncoderTaskPriority, nullptr) == pdPASS &&
+           xTaskCreate(blinkTaskEntry, "Blink", config::kUIManagerStackWords, this,
+                       config::kUIManagerPriority, nullptr) == pdPASS;
 }
 
 [[noreturn]] void Application::startScheduler()

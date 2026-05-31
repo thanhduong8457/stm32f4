@@ -14,10 +14,22 @@ namespace app
  */
 enum class SystemCommand : uint8_t
 {
-    SetMotorTarget = 1,
+    SetTargetRpm = 1,
     StopMotor,
     EncoderFeedback,
     StatusRequest,
+    SetKp,
+    SetKi,
+    SetKd,
+    SetSampleTime,
+    GetTargetRpm,
+    GetKp,
+    GetKi,
+    GetKd,
+    GetSampleTime,
+    SaveConfig,
+    LoadConfig,
+    ResetPid,
     InvalidCommand,
 };
 
@@ -35,6 +47,30 @@ enum class MessageSource : uint8_t
     Encoder,
 };
 
+enum class RotationDirection : int8_t
+{
+    Stopped = 0,
+    Cw = 1,
+    Ccw = -1,
+};
+
+enum class MotorCommandType : uint8_t
+{
+    SetTargetRpm = 1,
+    Stop,
+    SetActualRpm,
+    SetKp,
+    SetKi,
+    SetKd,
+    SetControlPeriod,
+    ResetPid,
+};
+
+enum class EncoderCommandType : uint8_t
+{
+    SetSamplePeriod = 1,
+};
+
 /**
  * Generic cross-manager message.
  *
@@ -46,30 +82,39 @@ struct SystemMessage
     SystemCommand cmd;
     MessageSource source;
     int32_t value;
+    int32_t aux = 0;
+    int32_t extra = 0;
 };
 
 /**
- * Message consumed by MotorController.
- *
- * SetMotorTarget uses target as a requested servo angle. StopMotor ignores the
- * target field and disables output until a new target command arrives.
+ * Message consumed by MotorController. The value field carries the primary
+ * payload for the selected type, for example target RPM, actual RPM, or a PID
+ * gain in milli-units.
  */
 struct MotorCommand
 {
-    SystemCommand cmd;
-    int32_t target;
+    MotorCommandType type;
+    int32_t value;
+};
+
+/**
+ * Message consumed by EncoderManager.
+ */
+struct EncoderCommand
+{
+    EncoderCommandType type;
+    int32_t value;
 };
 
 /**
  * Encoder sample delivered to higher-level logic.
- *
- * position is the current counter-derived position and delta is the movement
- * since the previous sample.
  */
 struct EncoderFeedback
 {
-    int32_t position;
+    int32_t count;
     int32_t delta;
+    int32_t rpm;
+    RotationDirection direction;
 };
 
 } // namespace app

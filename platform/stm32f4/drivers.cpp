@@ -83,7 +83,7 @@ void Uart1::handleIrq()
     portYIELD_FROM_ISR(higherPriorityTaskWoken);
 }
 
-void Tim4Channel4Servo::initialize()
+void Tim4Channel4Pwm::initialize()
 {
     TIM_TimeBaseInitTypeDef timBase{};
     TIM_OCInitTypeDef timOc{};
@@ -101,7 +101,7 @@ void Tim4Channel4Servo::initialize()
     gpioInit.GPIO_PuPd = GPIO_PuPd_NOPULL;
     GPIO_Init(GPIOB, &gpioInit);
 
-    timBase.TIM_Period = 20000 - 1;
+    timBase.TIM_Period = 1000 - 1;
     timBase.TIM_Prescaler = 84 - 1;
     timBase.TIM_ClockDivision = 0;
     timBase.TIM_CounterMode = TIM_CounterMode_Up;
@@ -117,15 +117,14 @@ void Tim4Channel4Servo::initialize()
     TIM_Cmd(TIM4, ENABLE);
 }
 
-void Tim4Channel4Servo::setAngleDegrees(uint8_t angleDegrees)
+void Tim4Channel4Pwm::setDutyCyclePermille(uint16_t dutyPermille)
 {
-    if (angleDegrees > 180U)
+    if (dutyPermille > 1000U)
     {
-        angleDegrees = 180U;
+        dutyPermille = 1000U;
     }
 
-    const uint16_t pulseUs = static_cast<uint16_t>(500U + (angleDegrees * 2000U) / 180U);
-    TIM_SetCompare4(TIM4, pulseUs);
+    TIM_SetCompare4(TIM4, dutyPermille);
 }
 
 void Tim3Encoder::initialize()
@@ -152,9 +151,7 @@ void Tim3Encoder::initialize()
     timBase.TIM_CounterMode = TIM_CounterMode_Up;
     TIM_TimeBaseInit(TIM3, &timBase);
 
-    TIM_EncoderInterfaceConfig(TIM3,
-                               TIM_EncoderMode_TI12,
-                               TIM_ICPolarity_Rising,
+    TIM_EncoderInterfaceConfig(TIM3, TIM_EncoderMode_TI12, TIM_ICPolarity_Rising,
                                TIM_ICPolarity_Rising);
     TIM_SetCounter(TIM3, 0);
     TIM_Cmd(TIM3, ENABLE);
@@ -162,7 +159,7 @@ void Tim3Encoder::initialize()
 
 int32_t Tim3Encoder::read() const
 {
-    return static_cast<int16_t>(TIM_GetCounter(TIM3));
+    return static_cast<uint16_t>(TIM_GetCounter(TIM3));
 }
 
 void Pc13Led::initialize()

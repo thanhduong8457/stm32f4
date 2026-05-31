@@ -6,9 +6,9 @@ The firmware is now split into explicit ownership layers:
 
 | Layer | Folder | Responsibility |
 | --- | --- | --- |
-| Application | `include/app`, `src/app` | RTOS tasks, service-mode command parsing, system state, motor/encoder workflow |
+| Application | `src/app` | RTOS tasks, service-mode command parsing, runtime configuration, encoder feedback, PID speed control |
 | Middleware | `include/middleware` | Small FreeRTOS wrappers used by application classes |
-| HAL interfaces | `include/hal` | C++ contracts for UART, servo/PWM, encoder, GPIO output, hardware components |
+| HAL interfaces | `include/hal` | C++ contracts for UART, PWM duty output, encoder, GPIO output, hardware components |
 | Platform | `platform/stm32f1`, `platform/stm32f4` | Chip-specific startup, linker, StdPeriph/CMSIS setup, concrete peripheral drivers |
 | RTOS/vendor | `FreeRTOS-Kernel`, `stm32f10x-stdperiph-lib`, `STM32F4_Driver` | Third-party kernel and STM32 vendor code |
 
@@ -28,6 +28,8 @@ flowchart TB
     subgraph AppLayer[Application layer]
         InterfaceManager[app::InterfaceManager]
         CEO[app::CEO]
+        ConfigManager[app::ConfigurationManager]
+        PidController[app::PidController]
         MotorController[app::MotorController]
         EncoderManager[app::EncoderManager]
         UIManager[app::UIManager]
@@ -41,7 +43,7 @@ flowchart TB
 
     subgraph HalLayer[HAL interface layer]
         IUart[hal::IUart]
-        IServoOutput[hal::IServoOutput]
+        IPwmOutput[hal::IPwmOutput]
         IEncoder[hal::IEncoder]
         IDigitalOutput[hal::IDigitalOutput]
     end
@@ -68,26 +70,30 @@ flowchart TB
 
     InterfaceManager --> Messages
     CEO --> Messages
+    CEO --> ConfigManager
     MotorController --> Messages
+    MotorController --> PidController
     EncoderManager --> Messages
 
     InterfaceManager --> RtosQueue
+    CEO --> RtosQueue
     MotorController --> RtosQueue
+    EncoderManager --> RtosQueue
     RtosQueue --> FreeRTOSApi
     FreeRTOSApi --> FreeRTOS
 
     InterfaceManager --> IUart
-    MotorController --> IServoOutput
+    MotorController --> IPwmOutput
     EncoderManager --> IEncoder
     UIManager --> IDigitalOutput
 
     F1Board -. implements .-> IUart
-    F1Board -. implements .-> IServoOutput
+    F1Board -. implements .-> IPwmOutput
     F1Board -. implements .-> IEncoder
     F1Board -. implements .-> IDigitalOutput
 
     F4Board -. implements .-> IUart
-    F4Board -. implements .-> IServoOutput
+    F4Board -. implements .-> IPwmOutput
     F4Board -. implements .-> IEncoder
     F4Board -. implements .-> IDigitalOutput
 
@@ -95,7 +101,7 @@ flowchart TB
     F4Board --> F4Vendor
 ```
 
-### Runtime Message Flow
+### Service Mode And PID Tuning Flow
 
 ```mermaid
 sequenceDiagram
@@ -103,8 +109,8 @@ sequenceDiagram
     participant ISR as USART1_IRQHandler
     participant Interface as InterfaceManager
     participant Director as CEO
+    participant Config as ConfigurationManager
     participant Motor as MotorController
-    participant Servo as IServoOutput
     participant Encoder as EncoderManager
     participant Led as UIManager
 
@@ -115,31 +121,19 @@ sequenceDiagram
     Led->>Led: Stop normal blink and set LED off
     Interface->>Host: OK service mode entered
 
-    Host->>ISR: Service command bytes
+    Host->>ISR: SET KP 1.200 bytes
     ISR->>Interface: onRxByteFromIsr(byte)
-    Interface->>Interface: Validate service-mode syntax
-    Interface->>Director: Parsed SystemCommand
-
-    alt SET command valid and applied
-        Director->>Director: Validate target range
-        Director->>Motor: MotorCommand SetMotorTarget
-        Motor->>Motor: Clamp target and update state
-        Motor->>Servo: setAngleDegrees(target)
-        Director->>Host: OK target accepted
+    Interface->>Interface: Parse fixed-point value
+    Interface->>Director: SystemCommand::SetKp
+    Director->>Config: Validate requested KP
+    alt valid and motor queue accepted
+        Director->>Config: Update active KP
+        Director->>Motor: MotorCommand SetKp
+        Director->>Host: OK
         Director->>Led: SettingSucceeded event
-        Led->>Led: Blink status LED 2 times, then off
-    else STOP command applied
-        Director->>Motor: MotorCommand StopMotor
-        Motor->>Servo: setAngleDegrees(0)
-        Director->>Host: OK motor stopped
-        Director->>Led: SettingSucceeded event
-        Led->>Led: Blink status LED 2 times, then off
-    else invalid setting or failed apply
+    else invalid value or busy queue
         Director->>Host: ERR response
         Director->>Led: SettingFailed event
-        Led->>Led: Blink status LED 3 times, then off
-    else STATUS command
-        Director->>Host: STATUS text response
     end
 
     Host->>ISR: exit bytes
@@ -151,6 +145,63 @@ sequenceDiagram
         Encoder->>Director: EncoderFeedback
         Led->>Led: Toggle IDigitalOutput
     end
+```
+
+### Closed-Loop Control Flow
+
+```mermaid
+sequenceDiagram
+    participant EncoderHw as TIM3 encoder mode
+    participant Encoder as EncoderManager
+    participant Director as CEO
+    participant Motor as MotorController
+    participant PID as PidController
+    participant PWM as TIM4 CH4 PWM
+
+    loop every SAMPLE_TIME ms
+        Encoder->>EncoderHw: Read quadrature count
+        Encoder->>Encoder: delta = int16(raw - previous)
+        Encoder->>Encoder: rpm = abs(delta) * 60000 / (CPR * sample_ms)
+        Encoder->>Director: EncoderFeedback(count, rpm, direction)
+        Director->>Motor: MotorCommand SetActualRpm
+    end
+
+    loop every control period
+        Motor->>Motor: Drain queued commands without blocking
+        Motor->>Motor: Soft-start ramp target RPM
+        Motor->>PID: update(ramped target RPM, actual RPM)
+        PID->>PID: Kp + Ki + Kd with anti-windup and output limits
+        PID-->>Motor: duty permille 0..1000
+        Motor->>PWM: setDutyCyclePermille(duty)
+    end
+```
+
+### State Machine
+
+```mermaid
+stateDiagram-v2
+    state ServiceWorkflow {
+        [*] --> NormalMode
+        NormalMode: LED toggles every 1 second
+        NormalMode --> ServiceMode: UART SERVICE MODE
+        ServiceMode: LED off, UART config enabled
+        ServiceMode --> CommandOk: Valid command applied
+        ServiceMode --> CommandError: Invalid command or failed queue
+        CommandOk: Blink LED 2 times
+        CommandError: Blink LED 3 times
+        CommandOk --> ServiceMode
+        CommandError --> ServiceMode
+        ServiceMode --> NormalMode: UART exit
+    }
+
+    state MotorControl {
+        [*] --> MotorStopped
+        MotorStopped --> SoftStart: SET RPM > 0
+        SoftStart --> ClosedLoop: ramped target reaches target RPM
+        ClosedLoop --> ClosedLoop: Encoder feedback + PID update
+        ClosedLoop --> MotorStopped: STOP or SET RPM 0
+        SoftStart --> MotorStopped: STOP or SET RPM 0
+    }
 ```
 
 ### Build Target Selection
@@ -178,13 +229,57 @@ flowchart LR
 | Class | Role |
 | --- | --- |
 | `app::Application` | Initializes managers and creates FreeRTOS tasks |
-| `app::CEO` | Owns system state, validates service commands, routes motor commands, reports setting results |
+| `app::CEO` | Coordinates UART commands, runtime configuration, encoder feedback, motor commands, status responses, and LED command results |
 | `app::InterfaceManager` | Owns UART RX queue, service-mode gate, line parser, and responses |
-| `app::MotorController` | Owns motor queue and servo output policy |
-| `app::EncoderManager` | Samples encoder feedback and reports to Director |
+| `app::ConfigurationManager` | Validates active PID/RPM/sample-time parameters and stores the RAM-backed saved configuration shadow |
+| `app::PidController` | Computes saturated PWM duty with Kp, Ki, Kd, integral anti-windup, and resettable controller state |
+| `app::MotorController` | Owns the periodic speed-control task, soft-start, PID module, and PWM duty output policy |
+| `app::EncoderManager` | Samples TIM encoder counts, calculates pulse count/direction/RPM, and reports feedback to CEO |
 | `app::UIManager` | Owns normal blinking, service-mode LED-off state, and success/failure status blink patterns |
 | `platform::stm32f1::Board` | Wires STM32F1 drivers into the application graph |
 | `platform::stm32f4::Board` | Wires STM32F407 drivers into the application graph |
+
+## Runtime Configuration
+
+`ConfigurationManager` keeps one active configuration and one saved shadow:
+
+| Parameter | Range | Default | UART |
+| --- | --- | --- | --- |
+| Target RPM | `0..10000` | `0` | `SET RPM`, `GET RPM` |
+| Kp | `0.000..100.000` | `1.200` | `SET KP`, `GET KP` |
+| Ki | `0.000..100.000` | `0.080` | `SET KI`, `GET KI` |
+| Kd | `0.000..100.000` | `0.020` | `SET KD`, `GET KD` |
+| Sample/control time | `5..1000 ms` | `20 ms` | `SET SAMPLE_TIME`, `GET SAMPLE_TIME` |
+
+PID gains are parsed and stored as fixed-point milli-units, so `1.200` is held
+as `1200`. `SAVE CONFIG` copies active values to the shadow; `LOAD CONFIG`
+restores the shadow and immediately posts the loaded values to the motor and
+encoder managers. The current storage backend is volatile RAM by design; a
+target-specific Flash/EEPROM implementation can replace the shadow without
+changing the UART or control-loop APIs.
+
+## Encoder RPM Calculation
+
+Both STM32 targets use TIM3 hardware encoder mode with PA6/PA7 as quadrature A/B
+inputs. The portable encoder task reads the raw 16-bit timer count and computes:
+
+```text
+delta_counts = int16(current_raw_count - previous_raw_count)
+encoder_count += delta_counts
+rpm = abs(delta_counts) * 60000 / (encoder_counts_per_revolution * sample_time_ms)
+```
+
+Positive deltas are reported as `CW`, negative deltas as `CCW`, and zero deltas
+as `STOPPED`. The default scale is `1024` counts per revolution in
+`src/app/app_config.hpp`.
+
+## Control Timing
+
+The motor controller task is the deterministic control loop. It drains pending
+motor commands with zero timeout, advances the soft-start target ramp, runs PID,
+updates PWM duty, then sleeps with `vTaskDelayUntil(controlPeriodMs)`. The UART
+path never performs PWM writes directly, and the control loop does not print or
+send UART responses.
 
 ## Adding Hardware
 

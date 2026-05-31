@@ -10,13 +10,7 @@ namespace hal
 class IPwmOutput : public IHardwareComponent
 {
 public:
-    virtual void setPulseWidthUs(uint16_t pulseWidthUs) = 0;
-};
-
-class IServoOutput : public IHardwareComponent
-{
-public:
-    virtual void setAngleDegrees(uint8_t angleDegrees) = 0;
+    virtual void setDutyCyclePermille(uint16_t dutyPermille) = 0;
 };
 
 } // namespace hal
