@@ -100,8 +100,12 @@ void EncoderManager::sample()
 
     if (director_ != nullptr)
     {
-        const SystemMessage message{SystemCommand::EncoderFeedback, MessageSource::Encoder, count_,
-                                    rpm_, static_cast<int32_t>(direction_)};
+        const SystemMessage message{SystemCommand::EncoderFeedback,
+                                    MessageSource::Encoder,
+                                    count_,
+                                    rpm_,
+                                    static_cast<int32_t>(direction_),
+                                    delta};
         (void)director_->sendEvent(message, 0);
     }
 }

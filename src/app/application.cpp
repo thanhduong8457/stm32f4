@@ -27,6 +27,11 @@ void motorTaskEntry(void *parameters)
     static_cast<Application *>(parameters)->motor().run();
 }
 
+void pidTaskEntry(void *parameters)
+{
+    static_cast<Application *>(parameters)->pid().run();
+}
+
 void encoderTaskEntry(void *parameters)
 {
     static_cast<Application *>(parameters)->encoder().run();
@@ -49,8 +54,9 @@ void blinkTaskEntry(void *parameters)
 } // namespace
 
 Application::Application(CEO &director, InterfaceManager &interface, MotorController &motor,
-                         EncoderManager &encoder, UIManager &blink)
-    : director_(director), interface_(interface), motor_(motor), encoder_(encoder), blink_(blink)
+                         PidManager &pid, EncoderManager &encoder, UIManager &blink)
+    : director_(director), interface_(interface), motor_(motor), pid_(pid), encoder_(encoder),
+      blink_(blink)
 {
 }
 
@@ -58,8 +64,9 @@ void Application::initialize()
 {
     blink_.initialize();
     director_.initialize(blink_, encoder_);
-    interface_.initialize(director_, blink_);
+    interface_.initialize(director_);
     motor_.initialize();
+    pid_.initialize(director_);
     encoder_.initialize(director_);
 }
 
@@ -71,6 +78,8 @@ bool Application::createTasks()
                        config::kInterfaceTaskPriority, nullptr) == pdPASS &&
            xTaskCreate(motorTaskEntry, "Motor", config::kMotorTaskStackWords, this,
                        config::kMotorTaskPriority, nullptr) == pdPASS &&
+           xTaskCreate(pidTaskEntry, "PID", config::kPidTaskStackWords, this,
+                       config::kPidTaskPriority, nullptr) == pdPASS &&
            xTaskCreate(encoderTaskEntry, "Encoder", config::kEncoderTaskStackWords, this,
                        config::kEncoderTaskPriority, nullptr) == pdPASS &&
            xTaskCreate(blinkTaskEntry, "Blink", config::kUIManagerStackWords, this,
@@ -101,6 +110,11 @@ InterfaceManager &Application::interface()
 MotorController &Application::motor()
 {
     return motor_;
+}
+
+PidManager &Application::pid()
+{
+    return pid_;
 }
 
 EncoderManager &Application::encoder()

@@ -5,6 +5,7 @@
 #include "app/encoder_manager.hpp"
 #include "app/interface_manager.hpp"
 #include "app/motor_controller.hpp"
+#include "app/pid_manager.hpp"
 #include "app/ui_manager.hpp"
 #include "platform/common/board.hpp"
 #include "platform/stm32f4/drivers.hpp"
@@ -28,10 +29,11 @@ private:
     Pc13Led led_{};
     app::InterfaceManager interface_{uart1_};
     app::MotorController motor_{pwm_};
-    app::CEO director_{interface_, motor_};
+    app::PidManager pid_{};
+    app::CEO director_{interface_, motor_, pid_};
     app::EncoderManager encoderManager_{encoder_};
     app::UIManager blink_{led_};
-    app::Application application_{director_, interface_, motor_, encoderManager_, blink_};
+    app::Application application_{director_, interface_, motor_, pid_, encoderManager_, blink_};
 };
 
 Board &board();

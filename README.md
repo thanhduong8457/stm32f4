@@ -1,10 +1,10 @@
 # adas_mcu_dev
 
-STM32 FreeRTOS firmware refactored into a C++ object-oriented architecture with target-selectable platform configuration.
+STM32 FreeRTOS firmware using a manager-based C++ architecture with target-selectable platform configuration.
 
 ## Layout
 
-- `src/app`: application managers, PID controller, runtime configuration, and tasks
+- `src/app`: application managers, isolated PID logic, runtime configuration, and tasks
 - `include/hal`: hardware-facing C++ interfaces
 - `include/middleware`: FreeRTOS helper wrappers
 - `platform/stm32f1`: STM32F103 startup, linker script, board composition, StdPeriph drivers
@@ -76,6 +76,23 @@ STOP                      Disable motor output and clear target RPM.
 Commands are validated before changes are applied. Invalid syntax, out-of-range
 targets, or a busy application queue return an `ERR ...` response.
 
+## Manager Architecture
+
+`app::CEO` is the director. It receives manager events, chooses the next manager,
+routes messages, and monitors snapshots for status. It does not parse UART text,
+validate parameters, compute PID output, read encoder hardware, or generate PWM.
+
+- `InterfaceManager`: UART service mode, command parsing, parameter validation,
+  runtime config shadow, and UART responses.
+- `EncoderManager`: TIM3 encoder handling, direction, pulse count, RPM, and
+  diagnostics data.
+- `PidManager`: target RPM, PID gains, anti-windup, output limits, soft-start,
+  and periodic PID computation.
+- `MotorController`: motor enable/disable and TIM4 CH4 PWM duty application.
+- `UIManager`: normal LED blink and service-mode command result indication.
+
+Managers communicate through `CEO`; they do not call each other directly.
+
 ## Encoder And Control Loop
 
 TIM3 runs in hardware quadrature encoder mode on both STM32F1 and STM32F4
@@ -93,14 +110,16 @@ Direction is `CW` for positive deltas, `CCW` for negative deltas, and `STOPPED`
 when no pulses arrive during the sample. The default encoder scale is
 `1024` counts per revolution in `src/app/app_config.hpp`.
 
-`MotorController` owns the deterministic speed loop. It drains command messages
+`PidManager` owns the deterministic speed loop. It drains PID command messages
 without blocking, runs the PID update with `vTaskDelayUntil`, soft-starts target
-RPM when enabled, saturates output to `0..1000` duty permille, and writes only
-PWM duty updates to TIM4 CH4.
+RPM when enabled, and saturates output to `0..1000` duty permille. The PID
+manager publishes duty events to `CEO`, and `CEO` routes those events to
+`MotorController`, which only applies motor enable/disable and PWM duty updates
+to TIM4 CH4.
 
-`SAVE CONFIG` and `LOAD CONFIG` use `ConfigurationManager`'s RAM-backed shadow
-store. The storage API is isolated so a target-specific Flash/EEPROM backend can
-replace the volatile shadow later.
+`SAVE CONFIG` and `LOAD CONFIG` use `InterfaceManager`'s `ConfigurationManager`
+RAM-backed shadow store. The storage API is isolated so a target-specific
+Flash/EEPROM backend can replace the volatile shadow later.
 
 ## LED Behavior
 

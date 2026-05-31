@@ -17,6 +17,7 @@ enum class SystemCommand : uint8_t
     SetTargetRpm = 1,
     StopMotor,
     EncoderFeedback,
+    PidOutput,
     StatusRequest,
     SetKp,
     SetKi,
@@ -30,6 +31,10 @@ enum class SystemCommand : uint8_t
     SaveConfig,
     LoadConfig,
     ResetPid,
+    ServiceModeEntered,
+    ServiceModeExited,
+    SettingSucceeded,
+    SettingFailed,
     InvalidCommand,
 };
 
@@ -45,6 +50,7 @@ enum class MessageSource : uint8_t
     Director,
     Motor,
     Encoder,
+    Pid,
 };
 
 enum class RotationDirection : int8_t
@@ -56,14 +62,20 @@ enum class RotationDirection : int8_t
 
 enum class MotorCommandType : uint8_t
 {
+    SetDuty = 1,
+    Enable,
+    Disable,
+};
+
+enum class PidCommandType : uint8_t
+{
     SetTargetRpm = 1,
-    Stop,
     SetActualRpm,
     SetKp,
     SetKi,
     SetKd,
     SetControlPeriod,
-    ResetPid,
+    Reset,
 };
 
 enum class EncoderCommandType : uint8_t
@@ -84,16 +96,27 @@ struct SystemMessage
     int32_t value;
     int32_t aux = 0;
     int32_t extra = 0;
+    int32_t detail = 0;
+    int32_t detail2 = 0;
 };
 
 /**
- * Message consumed by MotorController. The value field carries the primary
- * payload for the selected type, for example target RPM, actual RPM, or a PID
- * gain in milli-units.
+ * Message consumed by MotorController. MotorController only applies PWM duty
+ * and enable state; it does not own speed-control algorithms.
  */
 struct MotorCommand
 {
     MotorCommandType type;
+    int32_t value;
+};
+
+/**
+ * Message consumed by PidManager. The value field carries target RPM, actual
+ * RPM, sample time, or PID gain milli-units depending on type.
+ */
+struct PidCommand
+{
+    PidCommandType type;
     int32_t value;
 };
 
@@ -115,6 +138,40 @@ struct EncoderFeedback
     int32_t delta;
     int32_t rpm;
     RotationDirection direction;
+};
+
+struct SystemStatus
+{
+    int32_t currentRpm = 0;
+    int32_t targetRpm = 0;
+    int32_t pwmDutyPermille = 0;
+    RotationDirection direction = RotationDirection::Stopped;
+    int32_t kp = 0;
+    int32_t ki = 0;
+    int32_t kd = 0;
+    int32_t pidOutput = 0;
+    int32_t encoderCount = 0;
+    bool controllerEnabled = false;
+};
+
+enum class InterfaceEventType : uint8_t
+{
+    CommandOk = 1,
+    ManagerBusy,
+    Unsupported,
+    Status,
+};
+
+struct InterfaceEvent
+{
+    InterfaceEventType type;
+    SystemCommand command = SystemCommand::InvalidCommand;
+    int32_t value = 0;
+    int32_t aux = 0;
+    int32_t extra = 0;
+    int32_t detail = 0;
+    int32_t detail2 = 0;
+    SystemStatus status{};
 };
 
 } // namespace app

@@ -18,17 +18,21 @@ constexpr uint16_t kDirectorTaskStackWords = 256;
 constexpr uint16_t kInterfaceTaskStackWords = 256;
 constexpr uint16_t kMotorTaskStackWords = 192;
 constexpr uint16_t kEncoderTaskStackWords = 192;
+constexpr uint16_t kPidTaskStackWords = 192;
 constexpr uint16_t kUIManagerStackWords = 128;
 
 constexpr UBaseType_t kDirectorTaskPriority = 3;
 constexpr UBaseType_t kInterfaceTaskPriority = 3;
 constexpr UBaseType_t kMotorTaskPriority = 2;
 constexpr UBaseType_t kEncoderTaskPriority = 2;
+constexpr UBaseType_t kPidTaskPriority = 3;
 constexpr UBaseType_t kUIManagerPriority = 1;
 
 constexpr uint8_t kDirectorQueueLength = 8;
 constexpr uint8_t kMotorQueueLength = 8;
+constexpr uint8_t kPidQueueLength = 8;
 constexpr uint8_t kEncoderQueueLength = 4;
+constexpr uint8_t kInterfaceEventQueueLength = 4;
 constexpr uint8_t kBlinkEventQueueLength = 4;
 constexpr uint8_t kInterfaceRxQueueLength = 64;
 constexpr uint8_t kInterfacePacketMaxLength = 64;

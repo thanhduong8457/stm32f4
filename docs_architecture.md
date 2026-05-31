@@ -6,7 +6,7 @@ The firmware is now split into explicit ownership layers:
 
 | Layer | Folder | Responsibility |
 | --- | --- | --- |
-| Application | `src/app` | RTOS tasks, service-mode command parsing, runtime configuration, encoder feedback, PID speed control |
+| Application | `src/app` | RTOS managers, service-mode command parsing, runtime configuration, encoder feedback, PID speed control |
 | Middleware | `include/middleware` | Small FreeRTOS wrappers used by application classes |
 | HAL interfaces | `include/hal` | C++ contracts for UART, PWM duty output, encoder, GPIO output, hardware components |
 | Platform | `platform/stm32f1`, `platform/stm32f4` | Chip-specific startup, linker, StdPeriph/CMSIS setup, concrete peripheral drivers |
@@ -29,6 +29,7 @@ flowchart TB
         InterfaceManager[app::InterfaceManager]
         CEO[app::CEO]
         ConfigManager[app::ConfigurationManager]
+        PidManager[app::PidManager]
         PidController[app::PidController]
         MotorController[app::MotorController]
         EncoderManager[app::EncoderManager]
@@ -65,20 +66,24 @@ flowchart TB
     Application --> InterfaceManager
     Application --> CEO
     Application --> MotorController
+    Application --> PidManager
     Application --> EncoderManager
     Application --> UIManager
 
     InterfaceManager --> Messages
+    InterfaceManager --> ConfigManager
     CEO --> Messages
-    CEO --> ConfigManager
+    PidManager --> Messages
+    PidManager --> PidController
     MotorController --> Messages
-    MotorController --> PidController
     EncoderManager --> Messages
 
     InterfaceManager --> RtosQueue
     CEO --> RtosQueue
+    PidManager --> RtosQueue
     MotorController --> RtosQueue
     EncoderManager --> RtosQueue
+    UIManager --> RtosQueue
     RtosQueue --> FreeRTOSApi
     FreeRTOSApi --> FreeRTOS
 
@@ -110,41 +115,45 @@ sequenceDiagram
     participant Interface as InterfaceManager
     participant Director as CEO
     participant Config as ConfigurationManager
-    participant Motor as MotorController
-    participant Encoder as EncoderManager
+    participant PID as PidManager
     participant Led as UIManager
 
     Host->>ISR: SERVICE MODE bytes on USART1
     ISR->>Interface: onRxByteFromIsr(byte)
     Interface->>Interface: Build command line
-    Interface->>Led: ServiceMode event
+    Interface->>Director: ServiceModeEntered event
+    Director->>Led: ServiceMode event
     Led->>Led: Stop normal blink and set LED off
     Interface->>Host: OK service mode entered
 
     Host->>ISR: SET KP 1.200 bytes
     ISR->>Interface: onRxByteFromIsr(byte)
     Interface->>Interface: Parse fixed-point value
+    Interface->>Config: Validate requested KP
     Interface->>Director: SystemCommand::SetKp
-    Director->>Config: Validate requested KP
-    alt valid and motor queue accepted
-        Director->>Config: Update active KP
-        Director->>Motor: MotorCommand SetKp
-        Director->>Host: OK
+    alt PID queue accepted
+        Director->>PID: PidCommand SetKp
+        Director->>Interface: CommandOk event
+        Interface->>Config: Update active KP
+        Interface->>Host: OK
         Director->>Led: SettingSucceeded event
-    else invalid value or busy queue
-        Director->>Host: ERR response
+    else invalid value
+        Interface->>Host: ERR invalid KP
+        Interface->>Director: SettingFailed event
+        Director->>Led: SettingFailed event
+    else manager queue busy
+        Director->>Interface: ManagerBusy event
+        Interface->>Host: ERR manager busy
         Director->>Led: SettingFailed event
     end
 
     Host->>ISR: exit bytes
     ISR->>Interface: onRxByteFromIsr(byte)
-    Interface->>Led: NormalMode event
+    Interface->>Director: ServiceModeExited event
+    Director->>Led: NormalMode event
     Interface->>Host: OK service mode exited
 
-    loop normal-mode periodic tasks
-        Encoder->>Director: EncoderFeedback
-        Led->>Led: Toggle IDigitalOutput
-    end
+    Led->>Led: Resume 1-second normal blink
 ```
 
 ### Closed-Loop Control Flow
@@ -154,26 +163,49 @@ sequenceDiagram
     participant EncoderHw as TIM3 encoder mode
     participant Encoder as EncoderManager
     participant Director as CEO
-    participant Motor as MotorController
+    participant PIDMgr as PidManager
     participant PID as PidController
+    participant Motor as MotorController
     participant PWM as TIM4 CH4 PWM
 
     loop every SAMPLE_TIME ms
         Encoder->>EncoderHw: Read quadrature count
         Encoder->>Encoder: delta = int16(raw - previous)
         Encoder->>Encoder: rpm = abs(delta) * 60000 / (CPR * sample_ms)
-        Encoder->>Director: EncoderFeedback(count, rpm, direction)
-        Director->>Motor: MotorCommand SetActualRpm
+        Encoder->>Director: EncoderFeedback(count, delta, rpm, direction)
+        Director->>PIDMgr: PidCommand SetActualRpm
     end
 
-    loop every control period
-        Motor->>Motor: Drain queued commands without blocking
-        Motor->>Motor: Soft-start ramp target RPM
-        Motor->>PID: update(ramped target RPM, actual RPM)
+    loop every PID control period
+        PIDMgr->>PIDMgr: Drain queued PID commands without blocking
+        PIDMgr->>PIDMgr: Soft-start ramp target RPM
+        PIDMgr->>PID: update(ramped target RPM, actual RPM)
         PID->>PID: Kp + Ki + Kd with anti-windup and output limits
-        PID-->>Motor: duty permille 0..1000
+        PID-->>PIDMgr: duty permille 0..1000
+        PIDMgr->>Director: PidOutput(duty, enabled)
+        Director->>Motor: MotorCommand Enable/Disable and SetDuty
         Motor->>PWM: setDutyCyclePermille(duty)
     end
+```
+
+### Status Request Flow
+
+```mermaid
+sequenceDiagram
+    participant Host as UART host
+    participant Interface as InterfaceManager
+    participant Director as CEO
+    participant Encoder as EncoderManager
+    participant PID as PidManager
+    participant Motor as MotorController
+
+    Host->>Interface: STATUS
+    Interface->>Director: StatusRequest
+    Director->>Encoder: Request status snapshot
+    Director->>PID: Request status snapshot
+    Director->>Motor: Request status snapshot
+    Director->>Interface: Status event
+    Interface->>Host: UART status response
 ```
 
 ### State Machine
@@ -229,11 +261,12 @@ flowchart LR
 | Class | Role |
 | --- | --- |
 | `app::Application` | Initializes managers and creates FreeRTOS tasks |
-| `app::CEO` | Coordinates UART commands, runtime configuration, encoder feedback, motor commands, status responses, and LED command results |
-| `app::InterfaceManager` | Owns UART RX queue, service-mode gate, line parser, and responses |
-| `app::ConfigurationManager` | Validates active PID/RPM/sample-time parameters and stores the RAM-backed saved configuration shadow |
-| `app::PidController` | Computes saturated PWM duty with Kp, Ki, Kd, integral anti-windup, and resettable controller state |
-| `app::MotorController` | Owns the periodic speed-control task, soft-start, PID module, and PWM duty output policy |
+| `app::CEO` | Orchestrates manager requests/events, routes commands, coordinates workflows, and monitors manager status snapshots |
+| `app::InterfaceManager` | Owns UART RX queue, service-mode gate, line parser, parameter validation, runtime config shadow, and UART responses |
+| `app::ConfigurationManager` | Helper owned by InterfaceManager for validated active config and RAM-backed saved config shadow |
+| `app::PidManager` | Owns the periodic speed-control task, target RPM, PID gains, soft-start, anti-windup, and PID output events |
+| `app::PidController` | Pure PID math helper used only by PidManager |
+| `app::MotorController` | Owns motor enable/disable and PWM duty output policy; it performs no PID calculations |
 | `app::EncoderManager` | Samples TIM encoder counts, calculates pulse count/direction/RPM, and reports feedback to CEO |
 | `app::UIManager` | Owns normal blinking, service-mode LED-off state, and success/failure status blink patterns |
 | `platform::stm32f1::Board` | Wires STM32F1 drivers into the application graph |
@@ -241,7 +274,8 @@ flowchart LR
 
 ## Runtime Configuration
 
-`ConfigurationManager` keeps one active configuration and one saved shadow:
+`InterfaceManager` owns `ConfigurationManager`, which keeps one active
+configuration and one saved shadow:
 
 | Parameter | Range | Default | UART |
 | --- | --- | --- | --- |
@@ -253,10 +287,10 @@ flowchart LR
 
 PID gains are parsed and stored as fixed-point milli-units, so `1.200` is held
 as `1200`. `SAVE CONFIG` copies active values to the shadow; `LOAD CONFIG`
-restores the shadow and immediately posts the loaded values to the motor and
-encoder managers. The current storage backend is volatile RAM by design; a
-target-specific Flash/EEPROM implementation can replace the shadow without
-changing the UART or control-loop APIs.
+restores the shadow and sends a load request through CEO so CEO can route values
+to PidManager and EncoderManager. The current storage backend is volatile RAM
+by design; a target-specific Flash/EEPROM implementation can replace the shadow
+without changing the UART or control-loop APIs.
 
 ## Encoder RPM Calculation
 
@@ -275,11 +309,12 @@ as `STOPPED`. The default scale is `1024` counts per revolution in
 
 ## Control Timing
 
-The motor controller task is the deterministic control loop. It drains pending
-motor commands with zero timeout, advances the soft-start target ramp, runs PID,
-updates PWM duty, then sleeps with `vTaskDelayUntil(controlPeriodMs)`. The UART
-path never performs PWM writes directly, and the control loop does not print or
-send UART responses.
+The PID manager task is the deterministic control loop. It drains pending PID
+commands with zero timeout, advances the soft-start target ramp, runs PID, emits
+a duty event to CEO, then sleeps with `vTaskDelayUntil(controlPeriodMs)`. CEO
+routes duty events to MotorController. The UART path never performs PWM writes
+directly, MotorController performs no PID calculations, and the control loop
+does not print or send UART responses.
 
 ## Adding Hardware
 
