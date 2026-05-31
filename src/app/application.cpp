@@ -48,11 +48,11 @@ void blinkTaskEntry(void *parameters)
 
 } // namespace
 
-Application::Application(DirectorManager &director,
+Application::Application(CEO &director,
                          InterfaceManager &interface,
                          MotorController &motor,
                          EncoderManager &encoder,
-                         BlinkTask &blink)
+                         UIManager &blink)
     : director_(director),
       interface_(interface),
       motor_(motor),
@@ -63,11 +63,11 @@ Application::Application(DirectorManager &director,
 
 void Application::initialize()
 {
-    director_.initialize();
-    interface_.initialize(director_);
+    blink_.initialize();
+    director_.initialize(blink_);
+    interface_.initialize(director_, blink_);
     motor_.initialize();
     encoder_.initialize(director_);
-    blink_.initialize();
 }
 
 bool Application::createTasks()
@@ -98,9 +98,9 @@ bool Application::createTasks()
                        nullptr) == pdPASS &&
            xTaskCreate(blinkTaskEntry,
                        "Blink",
-                       config::kBlinkTaskStackWords,
+                       config::kUIManagerStackWords,
                        this,
-                       config::kBlinkTaskPriority,
+                       config::kUIManagerPriority,
                        nullptr) == pdPASS;
 }
 
@@ -115,7 +115,7 @@ bool Application::createTasks()
     haltOnFatalError("Scheduler failed to start");
 }
 
-DirectorManager &Application::director()
+CEO &Application::director()
 {
     return director_;
 }
@@ -135,7 +135,7 @@ EncoderManager &Application::encoder()
     return encoder_;
 }
 
-BlinkTask &Application::blink()
+UIManager &Application::blink()
 {
     return blink_;
 }

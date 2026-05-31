@@ -8,10 +8,11 @@
 namespace app
 {
 
+class UIManager;
 class InterfaceManager;
 class MotorController;
 
-class DirectorManager
+class CEO
 {
 public:
     struct State
@@ -22,9 +23,9 @@ public:
         bool motorEnabled = false;
     };
 
-    DirectorManager(InterfaceManager &interface, MotorController &motor);
+    CEO(InterfaceManager &interface, MotorController &motor);
 
-    void initialize();
+    void initialize(UIManager &blink);
     void run();
     bool sendEvent(const SystemMessage &message, uint32_t timeoutMs = 0);
     void processCommand(const SystemMessage &message);
@@ -32,10 +33,12 @@ public:
 
 private:
     bool isMotorTargetValid(int32_t value) const;
-    void sendMotorCommand(SystemCommand cmd, int32_t target);
+    bool sendMotorCommand(SystemCommand cmd, int32_t target);
+    void reportSettingResult(bool succeeded);
 
     InterfaceManager &interface_;
     MotorController &motor_;
+    UIManager *blink_ = nullptr;
     middleware::RtosQueue<SystemMessage> queue_;
     State state_{};
 };

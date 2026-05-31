@@ -4,14 +4,14 @@
 #include "task.h"
 
 #include "app/app_config.hpp"
-#include "app/director_manager.hpp"
+#include "app/ceo.hpp"
 
 namespace app
 {
 
 EncoderManager::EncoderManager(hal::IEncoder &encoder) : encoder_(encoder) {}
 
-void EncoderManager::initialize(DirectorManager &director)
+void EncoderManager::initialize(CEO &director)
 {
     director_ = &director;
     encoder_.initialize();

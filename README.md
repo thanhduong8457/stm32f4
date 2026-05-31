@@ -36,14 +36,56 @@ STM32 FreeRTOS firmware refactored into a C++ object-oriented architecture with 
 The STM32F407 linker script uses 1 MB FLASH at `0x08000000`, 128 KB RAM at
 `0x20000000`, and 64 KB CCMRAM at `0x10000000`.
 
-## Commands
+## UART Service Mode
 
-Send newline-terminated ASCII commands over USART1:
+USART1 accepts newline-terminated ASCII at 115200 8N1. Configuration commands
+are only accepted in service mode.
+
+Enter service mode:
 
 ```text
-SET 90
-STOP
-STATUS
+SERVICE MODE
+```
+
+Exit service mode:
+
+```text
+exit
+```
+
+Supported service-mode commands:
+
+```text
+SET <0..180>  Set the motor target angle in degrees.
+STOP          Disable motor output and clear the target.
+STATUS        Print current target, enabled state, encoder position, and delta.
+```
+
+Commands are validated before changes are applied. Invalid syntax, out-of-range
+targets, or a busy application queue return an `ERR ...` response.
+
+## LED Behavior
+
+- Normal mode: PC13 toggles every 1 second.
+- Entering service mode: normal blinking stops and PC13 is turned off.
+- Service mode: successful setting commands blink PC13 2 times, then leave it off.
+- Service mode: invalid or failed commands blink PC13 3 times, then leave it off.
+
+## Example UART Flow
+
+```text
+> SERVICE MODE
+< OK service mode entered
+> SET 90
+< OK target accepted
+> SET 220
+< ERR target range 0..180
+> STATUS
+< STATUS target=90 enabled=1 encoder=0 delta=0
+> STOP
+< OK motor stopped
+> exit
+< OK service mode exited
 ```
 
 ## Build

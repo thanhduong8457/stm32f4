@@ -1,14 +1,17 @@
 #include "app/interface_manager.hpp"
 
 #include <cctype>
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 
 #include "FreeRTOS.h"
 #include "task.h"
 
 #include "app/app_config.hpp"
-#include "app/director_manager.hpp"
+#include "app/ui_manager.hpp"
+#include "app/ceo.hpp"
 
 namespace app
 {
@@ -26,8 +29,11 @@ void trimLeadingSpaces(const char *&text)
 bool parseInteger(const char *text, int32_t &value)
 {
     char *end = nullptr;
+    errno = 0;
     const long parsed = std::strtol(text, &end, 10);
-    if (end == text)
+    if (end == text || errno == ERANGE ||
+        parsed < static_cast<long>(std::numeric_limits<int32_t>::min()) ||
+        parsed > static_cast<long>(std::numeric_limits<int32_t>::max()))
     {
         return false;
     }
@@ -45,13 +51,37 @@ bool parseInteger(const char *text, int32_t &value)
     return true;
 }
 
+bool hasOnlyTrailingSpaces(const char *text)
+{
+    while (*text != '\0')
+    {
+        if (std::isspace(static_cast<unsigned char>(*text)) == 0)
+        {
+            return false;
+        }
+        ++text;
+    }
+
+    return true;
+}
+
+bool isCommandLine(const char *text, const char *command)
+{
+    const size_t commandLength = std::strlen(command);
+    return std::strncmp(text, command, commandLength) == 0 &&
+           hasOnlyTrailingSpaces(text + commandLength);
+}
+
 } // namespace
 
-InterfaceManager::InterfaceManager(hal::IUart &uart) : uart_(uart) {}
+InterfaceManager::InterfaceManager(hal::IUart &uart) : uart_(uart)
+{
+}
 
-void InterfaceManager::initialize(DirectorManager &director)
+void InterfaceManager::initialize(CEO &director, UIManager &blink)
 {
     director_ = &director;
+    blink_ = &blink;
     rxQueue_.create(config::kInterfaceRxQueueLength);
     resetPacket();
     uart_.initialize();
@@ -97,6 +127,10 @@ void InterfaceManager::processRx(char byte)
     {
         resetPacket();
         sendResponse("ERR packet too long\r\n");
+        if (serviceMode_)
+        {
+            reportSettingFailure();
+        }
         return;
     }
 
@@ -123,40 +157,100 @@ void InterfaceManager::resetPacket()
 
 void InterfaceManager::dispatchPacket(const char *packet)
 {
+    const char *cursor = packet;
+    trimLeadingSpaces(cursor);
+
+    if (!serviceMode_)
+    {
+        if (isCommandLine(cursor, "SERVICE MODE"))
+        {
+            serviceMode_ = true;
+            if (blink_ != nullptr)
+            {
+                (void)blink_->sendEvent(BlinkEvent::ServiceMode,
+                                        config::kManagerQueueSendTimeoutMs);
+            }
+            sendResponse("OK service mode entered\r\n");
+        }
+        else
+        {
+            sendResponse("ERR service mode required\r\n");
+        }
+        return;
+    }
+
+    if (isCommandLine(cursor, "exit"))
+    {
+        serviceMode_ = false;
+        if (blink_ != nullptr)
+        {
+            (void)blink_->sendEvent(BlinkEvent::NormalMode, config::kManagerQueueSendTimeoutMs);
+        }
+        sendResponse("OK service mode exited\r\n");
+        return;
+    }
+
+    if (isCommandLine(cursor, "SERVICE MODE"))
+    {
+        sendResponse("OK service mode active\r\n");
+        return;
+    }
+
+    dispatchServiceCommand(cursor);
+}
+
+void InterfaceManager::dispatchServiceCommand(const char *packet)
+{
     if (director_ == nullptr)
     {
         sendResponse("ERR director unavailable\r\n");
+        reportSettingFailure();
         return;
     }
 
     const char *cursor = packet;
-    trimLeadingSpaces(cursor);
-
     SystemMessage message{SystemCommand::InvalidCommand, MessageSource::Interface, 0};
 
-    if (std::strncmp(cursor, "SET", 3) == 0 && std::isspace(static_cast<unsigned char>(cursor[3])) != 0)
+    if (std::strncmp(cursor, "SET", 3) == 0 &&
+        std::isspace(static_cast<unsigned char>(cursor[3])) != 0)
     {
         cursor += 3;
         trimLeadingSpaces(cursor);
         if (!parseInteger(cursor, message.value))
         {
             sendResponse("ERR bad SET value\r\n");
+            reportSettingFailure();
             return;
         }
         message.cmd = SystemCommand::SetMotorTarget;
     }
-    else if (std::strcmp(cursor, "STOP") == 0)
+    else if (isCommandLine(cursor, "STOP"))
     {
         message.cmd = SystemCommand::StopMotor;
     }
-    else if (std::strcmp(cursor, "STATUS") == 0)
+    else if (isCommandLine(cursor, "STATUS"))
     {
         message.cmd = SystemCommand::StatusRequest;
+    }
+    else
+    {
+        sendResponse("ERR unsupported command\r\n");
+        reportSettingFailure();
+        return;
     }
 
     if (!director_->sendEvent(message, config::kManagerQueueSendTimeoutMs))
     {
         sendResponse("ERR director busy\r\n");
+        reportSettingFailure();
+    }
+}
+
+void InterfaceManager::reportSettingFailure()
+{
+    if (blink_ != nullptr)
+    {
+        (void)blink_->sendEvent(BlinkEvent::SettingFailed, config::kManagerQueueSendTimeoutMs);
     }
 }
 

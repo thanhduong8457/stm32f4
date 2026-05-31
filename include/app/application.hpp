@@ -1,7 +1,7 @@
 #pragma once
 
-#include "app/blink_task.hpp"
-#include "app/director_manager.hpp"
+#include "app/ui_manager.hpp"
+#include "app/ceo.hpp"
 #include "app/encoder_manager.hpp"
 #include "app/interface_manager.hpp"
 #include "app/motor_controller.hpp"
@@ -12,28 +12,28 @@ namespace app
 class Application
 {
 public:
-    Application(DirectorManager &director,
+    Application(CEO &director,
                 InterfaceManager &interface,
                 MotorController &motor,
                 EncoderManager &encoder,
-                BlinkTask &blink);
+                UIManager &blink);
 
     void initialize();
     bool createTasks();
     [[noreturn]] void startScheduler();
 
-    DirectorManager &director();
+    CEO &director();
     InterfaceManager &interface();
     MotorController &motor();
     EncoderManager &encoder();
-    BlinkTask &blink();
+    UIManager &blink();
 
 private:
-    DirectorManager &director_;
+    CEO &director_;
     InterfaceManager &interface_;
     MotorController &motor_;
     EncoderManager &encoder_;
-    BlinkTask &blink_;
+    UIManager &blink_;
 };
 
 } // namespace app

@@ -6,7 +6,7 @@ The firmware is now split into explicit ownership layers:
 
 | Layer | Folder | Responsibility |
 | --- | --- | --- |
-| Application | `include/app`, `src/app` | RTOS tasks, command parsing, system state, motor/encoder workflow |
+| Application | `include/app`, `src/app` | RTOS tasks, service-mode command parsing, system state, motor/encoder workflow |
 | Middleware | `include/middleware` | Small FreeRTOS wrappers used by application classes |
 | HAL interfaces | `include/hal` | C++ contracts for UART, servo/PWM, encoder, GPIO output, hardware components |
 | Platform | `platform/stm32f1`, `platform/stm32f4` | Chip-specific startup, linker, StdPeriph/CMSIS setup, concrete peripheral drivers |
@@ -27,10 +27,10 @@ flowchart TB
 
     subgraph AppLayer[Application layer]
         InterfaceManager[app::InterfaceManager]
-        DirectorManager[app::DirectorManager]
+        CEO[app::CEO]
         MotorController[app::MotorController]
         EncoderManager[app::EncoderManager]
-        BlinkTask[app::BlinkTask]
+        UIManager[app::UIManager]
         Messages[app::SystemMessage and command structs]
     end
 
@@ -61,13 +61,13 @@ flowchart TB
     Main --> SelectedBoard
     SelectedBoard --> Application
     Application --> InterfaceManager
-    Application --> DirectorManager
+    Application --> CEO
     Application --> MotorController
     Application --> EncoderManager
-    Application --> BlinkTask
+    Application --> UIManager
 
     InterfaceManager --> Messages
-    DirectorManager --> Messages
+    CEO --> Messages
     MotorController --> Messages
     EncoderManager --> Messages
 
@@ -79,7 +79,7 @@ flowchart TB
     InterfaceManager --> IUart
     MotorController --> IServoOutput
     EncoderManager --> IEncoder
-    BlinkTask --> IDigitalOutput
+    UIManager --> IDigitalOutput
 
     F1Board -. implements .-> IUart
     F1Board -. implements .-> IServoOutput
@@ -102,30 +102,52 @@ sequenceDiagram
     participant Host as UART host
     participant ISR as USART1_IRQHandler
     participant Interface as InterfaceManager
-    participant Director as DirectorManager
+    participant Director as CEO
     participant Motor as MotorController
     participant Servo as IServoOutput
     participant Encoder as EncoderManager
-    participant Led as BlinkTask
+    participant Led as UIManager
 
-    Host->>ISR: ASCII bytes on USART1
+    Host->>ISR: SERVICE MODE bytes on USART1
     ISR->>Interface: onRxByteFromIsr(byte)
     Interface->>Interface: Build command line
+    Interface->>Led: ServiceMode event
+    Led->>Led: Stop normal blink and set LED off
+    Interface->>Host: OK service mode entered
+
+    Host->>ISR: Service command bytes
+    ISR->>Interface: onRxByteFromIsr(byte)
+    Interface->>Interface: Validate service-mode syntax
     Interface->>Director: Parsed SystemCommand
 
-    alt SET command
+    alt SET command valid and applied
+        Director->>Director: Validate target range
         Director->>Motor: MotorCommand SetMotorTarget
         Motor->>Motor: Clamp target and update state
         Motor->>Servo: setAngleDegrees(target)
-    else STOP command
+        Director->>Host: OK target accepted
+        Director->>Led: SettingSucceeded event
+        Led->>Led: Blink status LED 2 times, then off
+    else STOP command applied
         Director->>Motor: MotorCommand StopMotor
         Motor->>Servo: setAngleDegrees(0)
+        Director->>Host: OK motor stopped
+        Director->>Led: SettingSucceeded event
+        Led->>Led: Blink status LED 2 times, then off
+    else invalid setting or failed apply
+        Director->>Host: ERR response
+        Director->>Led: SettingFailed event
+        Led->>Led: Blink status LED 3 times, then off
     else STATUS command
-        Director->>Interface: Send status response
-        Interface->>Host: UART text response
+        Director->>Host: STATUS text response
     end
 
-    loop periodic tasks
+    Host->>ISR: exit bytes
+    ISR->>Interface: onRxByteFromIsr(byte)
+    Interface->>Led: NormalMode event
+    Interface->>Host: OK service mode exited
+
+    loop normal-mode periodic tasks
         Encoder->>Director: EncoderFeedback
         Led->>Led: Toggle IDigitalOutput
     end
@@ -156,11 +178,11 @@ flowchart LR
 | Class | Role |
 | --- | --- |
 | `app::Application` | Initializes managers and creates FreeRTOS tasks |
-| `app::DirectorManager` | Owns system state, validates commands, routes motor commands |
-| `app::InterfaceManager` | Owns UART RX queue, line parser, and responses |
+| `app::CEO` | Owns system state, validates service commands, routes motor commands, reports setting results |
+| `app::InterfaceManager` | Owns UART RX queue, service-mode gate, line parser, and responses |
 | `app::MotorController` | Owns motor queue and servo output policy |
 | `app::EncoderManager` | Samples encoder feedback and reports to Director |
-| `app::BlinkTask` | Toggles the status LED through `hal::IDigitalOutput` |
+| `app::UIManager` | Owns normal blinking, service-mode LED-off state, and success/failure status blink patterns |
 | `platform::stm32f1::Board` | Wires STM32F1 drivers into the application graph |
 | `platform::stm32f4::Board` | Wires STM32F407 drivers into the application graph |
 
