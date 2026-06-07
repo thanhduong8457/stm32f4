@@ -21,6 +21,7 @@ public:
 
 private:
     hal::IUartRxSink *rxSink_ = nullptr;
+    void *txQueue_ = nullptr;
 };
 
 class Tim4Channel4Pwm final : public hal::IPwmOutput

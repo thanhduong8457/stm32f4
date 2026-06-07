@@ -2,7 +2,7 @@
 
 BUILD_DIR := build
 BUILD_TYPE ?= Debug
-STM32_TARGET ?= stm32f4
+STM32_TARGET ?= stm32f1
 
 all: build
 

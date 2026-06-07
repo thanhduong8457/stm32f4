@@ -30,12 +30,15 @@ void PidController::setControlPeriod(uint32_t periodMs)
     periodMs_ = periodMs == 0U ? 1U : periodMs;
 }
 
+void Uart1DummyPlaceholder() {} // Keep compiler happy if any placeholder needed, none here.
+
 void PidController::reset()
 {
-    previousError_ = 0;
+    previousActualRpm_ = 0;
     integralErrorMs_ = 0;
     output_ = 0;
-    hasPreviousError_ = false;
+    filteredDTerm_ = 0;
+    hasPreviousActualRpm_ = false;
 }
 
 int32_t PidController::update(int32_t targetRpm, int32_t actualRpm)
@@ -48,18 +51,27 @@ int32_t PidController::update(int32_t targetRpm, int32_t actualRpm)
     const int64_t iTerm =
         (static_cast<int64_t>(gains_.ki) * integralErrorMs_) / (config::kPidGainScale * 1000LL);
 
-    int64_t dTerm = 0;
-    if (hasPreviousError_)
+    int64_t rawDTerm = 0;
+    if (hasPreviousActualRpm_)
     {
-        const int32_t derivativeRpmPerSecond =
-            static_cast<int32_t>(((static_cast<int64_t>(error) - previousError_) * 1000LL) /
+        const int32_t rateOfChange =
+            static_cast<int32_t>(((static_cast<int64_t>(actualRpm) - previousActualRpm_) * 1000LL) /
                                  static_cast<int64_t>(periodMs_));
-        dTerm = (static_cast<int64_t>(gains_.kd) * derivativeRpmPerSecond) / config::kPidGainScale;
+        rawDTerm = -(static_cast<int64_t>(gains_.kd) * rateOfChange) / config::kPidGainScale;
     }
 
-    previousError_ = error;
-    hasPreviousError_ = true;
-    output_ = clampOutput(pTerm + iTerm + dTerm);
+    if (hasPreviousActualRpm_)
+    {
+        filteredDTerm_ = (200LL * rawDTerm + 800LL * filteredDTerm_) / 1000LL;
+    }
+    else
+    {
+        filteredDTerm_ = rawDTerm;
+    }
+
+    previousActualRpm_ = actualRpm;
+    hasPreviousActualRpm_ = true;
+    output_ = clampOutput(pTerm + iTerm + filteredDTerm_);
     return output_;
 }
 

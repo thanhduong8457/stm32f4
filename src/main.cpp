@@ -1,5 +1,3 @@
-#include <cstdio>
-
 #include "FreeRTOS.h"
 #include "task.h"
 
@@ -8,10 +6,14 @@
 namespace
 {
 
-[[noreturn]] void haltOnFatalError(const char *message)
+void writePanicText(const char *text)
 {
-    printf("%s\r\n", message);
-    taskDISABLE_INTERRUPTS();
+    auto &uart = platform::selectedBoard().uart();
+    uart.send(text);
+}
+
+[[noreturn]] void haltAfterPanic()
+{
     for (;;)
     {
     }
@@ -21,6 +23,7 @@ namespace
 
 extern "C"
 {
+    volatile bool g_inPanic = false;
     void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName);
     void vApplicationMallocFailedHook(void);
 }
@@ -36,14 +39,25 @@ int main(void)
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 {
     (void)xTask;
-    printf("[%s] STACK OVERFLOW in task: %s\r\n", __func__, pcTaskName);
+    g_inPanic = true;
     taskDISABLE_INTERRUPTS();
-    for (;;)
+
+    writePanicText("\r\n!!! STACK OVERFLOW in task: ");
+    if (pcTaskName != nullptr)
     {
+        writePanicText(pcTaskName);
     }
+    writePanicText(" !!!\r\n");
+
+    haltAfterPanic();
 }
 
 void vApplicationMallocFailedHook(void)
 {
-    haltOnFatalError("[vApplicationMallocFailedHook] MALLOC FAILED!");
+    g_inPanic = true;
+    taskDISABLE_INTERRUPTS();
+
+    writePanicText("\r\n!!! MALLOC FAILED !!!\r\n");
+
+    haltAfterPanic();
 }

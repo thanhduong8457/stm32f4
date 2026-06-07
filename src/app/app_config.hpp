@@ -14,12 +14,12 @@ constexpr uint32_t kMinControlLoopPeriodMs = 5;
 constexpr uint32_t kMaxControlLoopPeriodMs = 1000;
 constexpr uint32_t kManagerQueueSendTimeoutMs = 10;
 
-constexpr uint16_t kDirectorTaskStackWords = 256;
+constexpr uint16_t kDirectorTaskStackWords = 128;
 constexpr uint16_t kInterfaceTaskStackWords = 256;
-constexpr uint16_t kMotorTaskStackWords = 192;
-constexpr uint16_t kEncoderTaskStackWords = 192;
-constexpr uint16_t kPidTaskStackWords = 192;
-constexpr uint16_t kUIManagerStackWords = 128;
+constexpr uint16_t kMotorTaskStackWords = 64;
+constexpr uint16_t kEncoderTaskStackWords = 128;
+constexpr uint16_t kPidTaskStackWords = 128;
+constexpr uint16_t kUIManagerStackWords = 64;
 
 constexpr UBaseType_t kDirectorTaskPriority = 3;
 constexpr UBaseType_t kInterfaceTaskPriority = 3;

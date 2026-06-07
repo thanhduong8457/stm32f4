@@ -3,8 +3,12 @@
 #include <cstdint>
 
 #include "FreeRTOS.h"
+#include "queue.h"
+#include "task.h"
 #include "portmacro.h"
 #include "stm32f10x.h"
+
+extern "C" volatile bool g_inPanic;
 
 namespace platform::stm32f1
 {
@@ -16,6 +20,9 @@ void Uart1::setRxSink(hal::IUartRxSink *sink)
 
 void Uart1::initialize()
 {
+    txQueue_ = xQueueCreate(128, sizeof(char));
+    configASSERT(txQueue_ != nullptr);
+
     GPIO_InitTypeDef gpioInit{};
     USART_InitTypeDef usartInit{};
     NVIC_InitTypeDef nvicInit{};
@@ -29,6 +36,7 @@ void Uart1::initialize()
 
     gpioInit.GPIO_Pin = GPIO_Pin_10;
     gpioInit.GPIO_Mode = GPIO_Mode_IN_FLOATING;
+    gpioInit.GPIO_Speed = GPIO_Speed_50MHz;
     GPIO_Init(GPIOA, &gpioInit);
 
     usartInit.USART_BaudRate = 115200;
@@ -51,10 +59,21 @@ void Uart1::initialize()
 
 void Uart1::send(char ch)
 {
-    while ((USART1->SR & USART_SR_TXE) == 0)
+    if (g_inPanic || txQueue_ == nullptr || xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED)
     {
+        while ((USART1->SR & USART_SR_TXE) == 0)
+        {
+        }
+        USART1->DR = static_cast<uint16_t>(ch & 0xFF);
+        return;
     }
-    USART1->DR = static_cast<uint16_t>(ch & 0xFF);
+
+    if (xQueueSend(static_cast<QueueHandle_t>(txQueue_), &ch, portMAX_DELAY) == pdTRUE)
+    {
+        taskENTER_CRITICAL();
+        USART_ITConfig(USART1, USART_IT_TXE, ENABLE);
+        taskEXIT_CRITICAL();
+    }
 }
 
 void Uart1::send(const char *text)
@@ -67,17 +86,30 @@ void Uart1::send(const char *text)
 
 void Uart1::handleIrq()
 {
-    if (USART_GetITStatus(USART1, USART_IT_RXNE) == RESET)
+    BaseType_t higherPriorityTaskWoken = pdFALSE;
+
+    if (USART_GetITStatus(USART1, USART_IT_RXNE) != RESET)
     {
-        return;
+        const uint8_t byte = static_cast<uint8_t>(USART_ReceiveData(USART1) & 0xFFU);
+        if (rxSink_ != nullptr)
+        {
+            (void)rxSink_->onRxByteFromIsr(byte, &higherPriorityTaskWoken);
+        }
     }
 
-    BaseType_t higherPriorityTaskWoken = pdFALSE;
-    const uint8_t byte = static_cast<uint8_t>(USART_ReceiveData(USART1) & 0xFFU);
-    if (rxSink_ != nullptr)
+    if (USART_GetITStatus(USART1, USART_IT_TXE) != RESET)
     {
-        (void)rxSink_->onRxByteFromIsr(byte, &higherPriorityTaskWoken);
+        uint8_t txByte = 0;
+        if (xQueueReceiveFromISR(static_cast<QueueHandle_t>(txQueue_), &txByte, &higherPriorityTaskWoken) == pdTRUE)
+        {
+            USART1->DR = static_cast<uint16_t>(txByte & 0xFF);
+        }
+        else
+        {
+            USART_ITConfig(USART1, USART_IT_TXE, DISABLE);
+        }
     }
+
     portYIELD_FROM_ISR(higherPriorityTaskWoken);
 }
 

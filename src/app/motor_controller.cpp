@@ -26,7 +26,10 @@ bool MotorController::sendCommand(const MotorCommand &command, uint32_t timeoutM
 
 MotorController::Status MotorController::status() const
 {
-    return status_;
+    taskENTER_CRITICAL();
+    Status temp = status_;
+    taskEXIT_CRITICAL();
+    return temp;
 }
 
 void MotorController::run()

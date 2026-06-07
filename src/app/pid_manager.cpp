@@ -31,7 +31,10 @@ bool PidManager::sendCommand(const PidCommand &command, uint32_t timeoutMs)
 
 PidManager::Status PidManager::status() const
 {
-    return status_;
+    taskENTER_CRITICAL();
+    Status temp = status_;
+    taskEXIT_CRITICAL();
+    return temp;
 }
 
 void PidManager::run()

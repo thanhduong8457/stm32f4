@@ -90,6 +90,7 @@ target_link_options(${EXECUTABLE} PRIVATE
     -T${STM32_LINKER_SCRIPT}
     ${STM32_CPU_PARAMETERS}
     -Wl,-Map=${CMAKE_PROJECT_NAME}.map
+    -Wl,--no-warn-rwx-segments
     --specs=nosys.specs
     -Wl,--start-group
     -lc

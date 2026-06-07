@@ -32,10 +32,11 @@ private:
     uint32_t periodMs_ = 20;
     int32_t minOutput_ = 0;
     int32_t maxOutput_ = 1000;
-    int32_t previousError_ = 0;
+    int32_t previousActualRpm_ = 0;
     int64_t integralErrorMs_ = 0;
     int32_t output_ = 0;
-    bool hasPreviousError_ = false;
+    int64_t filteredDTerm_ = 0;
+    bool hasPreviousActualRpm_ = false;
 };
 
 } // namespace app
