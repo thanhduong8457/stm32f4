@@ -13,7 +13,7 @@ namespace platform::stm32f4
 class Uart1 final : public hal::IUart
 {
 public:
-    void setRxSink(hal::IUartRxSink *sink);
+    void setRxSink(hal::IUartRxSink *sink) override;
     void initialize() override;
     void send(char ch) override;
     void send(const char *text) override;

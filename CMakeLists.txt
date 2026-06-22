@@ -10,6 +10,16 @@ project(adas_mcu_dev C CXX ASM)
 
 set(STM32_TARGET "stm32f1" CACHE STRING "STM32 platform target: stm32f1, stm32f4")
 set_property(CACHE STM32_TARGET PROPERTY STRINGS stm32f1 stm32f4)
+option(ADAS_USB_COMPOSITE "Enable STM32F4 TinyUSB HID + CDC composite device" OFF)
+option(ADAS_USB_EXTRA_SERVICE_CDC "Expose an extra service/config CDC ACM port in USB composite mode" OFF)
+
+if (ADAS_USB_EXTRA_SERVICE_CDC AND NOT ADAS_USB_COMPOSITE)
+    message(FATAL_ERROR "ADAS_USB_EXTRA_SERVICE_CDC requires ADAS_USB_COMPOSITE=ON.")
+endif()
+
+if (ADAS_USB_COMPOSITE AND NOT STM32_TARGET STREQUAL "stm32f4")
+    message(FATAL_ERROR "ADAS_USB_COMPOSITE is currently implemented only for STM32_TARGET=stm32f4.")
+endif()
 
 set(STM32_TARGET_FILE ${CMAKE_CURRENT_SOURCE_DIR}/platform/${STM32_TARGET}/target.cmake)
 if (NOT EXISTS ${STM32_TARGET_FILE})
@@ -51,7 +61,7 @@ target_compile_options(freertos_kernel PRIVATE
     -Wall -Wextra -Wundef -Wshadow -Wredundant-decls
     -fno-common -ffunction-sections -fdata-sections -MD
     $<$<CONFIG:Debug>:-Og -g3 -ggdb>
-    $<$<CONFIG:Release>:-Og -g0>)
+    $<$<CONFIG:Release>:-Os -g0>)
 
 add_executable(${EXECUTABLE}
     ${APPLICATION_SOURCES}
@@ -59,11 +69,34 @@ add_executable(${EXECUTABLE}
     ${STM32_STD_LIB_SOURCES}
     ${STM32_STARTUP_SCRIPT})
 
+if (ADAS_USB_COMPOSITE)
+    set(TINYUSB_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/external/tinyusb)
+
+    target_sources(${EXECUTABLE} PRIVATE
+        ${TINYUSB_ROOT}/src/tusb.c
+        ${TINYUSB_ROOT}/src/common/tusb_fifo.c
+        ${TINYUSB_ROOT}/src/device/usbd.c
+        ${TINYUSB_ROOT}/src/device/usbd_control.c
+        ${TINYUSB_ROOT}/src/class/cdc/cdc_device.c
+        ${TINYUSB_ROOT}/src/class/hid/hid_device.c
+        ${TINYUSB_ROOT}/src/portable/synopsys/dwc2/dwc2_common.c
+        ${TINYUSB_ROOT}/src/portable/synopsys/dwc2/dcd_dwc2.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/platform/stm32f4/usb/usb_composite_device.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/platform/stm32f4/usb/usb_descriptors.c)
+
+    target_include_directories(${EXECUTABLE} PRIVATE
+        ${TINYUSB_ROOT}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/platform/stm32f4/usb)
+endif()
+
 target_compile_definitions(${EXECUTABLE} PRIVATE
     ${STM32_DEVICE_DEFINE}
     ${STM32_DENSITY_DEFINE}
     USE_STDPERIPH_DRIVER
-    HSE_VALUE=${STM32_HSE_VALUE})
+    HSE_VALUE=${STM32_HSE_VALUE}
+    ADAS_USB_COMPOSITE=$<BOOL:${ADAS_USB_COMPOSITE}>
+    ADAS_USB_EXTRA_SERVICE_CDC=$<BOOL:${ADAS_USB_EXTRA_SERVICE_CDC}>
+    ADAS_USB_CDC_COUNT=$<IF:$<BOOL:${ADAS_USB_EXTRA_SERVICE_CDC}>,2,1>)
 
 target_include_directories(${EXECUTABLE} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -84,7 +117,7 @@ target_compile_options(${EXECUTABLE} PRIVATE
         -Wno-register
         -Wsuggest-override>
     $<$<CONFIG:Debug>:-Og -g3 -ggdb>
-    $<$<CONFIG:Release>:-Og -g0>)
+    $<$<CONFIG:Release>:-Os -g0>)
 
 target_link_options(${EXECUTABLE} PRIVATE
     -T${STM32_LINKER_SCRIPT}

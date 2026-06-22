@@ -183,6 +183,7 @@ InterfaceManager::InterfaceManager(hal::IUart &uart) : uart_(uart)
 void InterfaceManager::initialize(CEO &director)
 {
     director_ = &director;
+    uart_.setRxSink(this);
     rxQueue_.create(config::kInterfaceRxQueueLength);
     eventQueue_.create(config::kInterfaceEventQueueLength);
     resetPacket();
@@ -191,7 +192,20 @@ void InterfaceManager::initialize(CEO &director)
 
 bool InterfaceManager::onRxByteFromIsr(uint8_t byte, void *higherPriorityTaskWoken)
 {
-    return rxQueue_.sendFromIsr(byte, static_cast<BaseType_t *>(higherPriorityTaskWoken));
+    return onRxByteFromIsr(byte, hal::ByteStreamChannel::Data, higherPriorityTaskWoken);
+}
+
+bool InterfaceManager::onRxByteFromIsr(uint8_t byte, hal::ByteStreamChannel channel,
+                                       void *higherPriorityTaskWoken)
+{
+    RxByte item{byte, channel};
+
+    if (higherPriorityTaskWoken == nullptr)
+    {
+        return rxQueue_.send(item, 0);
+    }
+
+    return rxQueue_.sendFromIsr(item, static_cast<BaseType_t *>(higherPriorityTaskWoken));
 }
 
 bool InterfaceManager::sendEvent(const InterfaceEvent &event, uint32_t timeoutMs)
@@ -201,11 +215,13 @@ bool InterfaceManager::sendEvent(const InterfaceEvent &event, uint32_t timeoutMs
 
 void InterfaceManager::sendResponse(const char *message)
 {
-    uart_.send(message);
+    uart_.sendTo(activeResponseChannel_, message);
 }
 
-void InterfaceManager::processRx(char byte)
+void InterfaceManager::processRx(char byte, hal::ByteStreamChannel channel)
 {
+    activeResponseChannel_ = channel;
+
     if (byte == '\b' || byte == 0x7F)
     {
         if (packetLength_ > 0U)
@@ -246,11 +262,13 @@ void InterfaceManager::processRx(char byte)
 
 void InterfaceManager::run()
 {
-    uint8_t byte = 0;
+    RxByte byte{};
     InterfaceEvent event{};
 
     for (;;)
     {
+        uart_.poll();
+
         while (eventQueue_.receive(event, 0))
         {
             handleInterfaceEvent(event);
@@ -258,7 +276,7 @@ void InterfaceManager::run()
 
         if (rxQueue_.receive(byte, pdMS_TO_TICKS(10)))
         {
-            processRx(static_cast<char>(byte));
+            processRx(static_cast<char>(byte.byte), byte.channel);
         }
     }
 }

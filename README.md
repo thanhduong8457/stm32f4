@@ -8,8 +8,9 @@ STM32 FreeRTOS firmware using a manager-based C++ architecture with target-selec
 - `include/hal`: hardware-facing C++ interfaces
 - `include/middleware`: FreeRTOS helper wrappers
 - `platform/stm32f1`: STM32F103 startup, linker script, board composition, StdPeriph drivers
-- `platform/stm32f4`: STM32F407 startup, linker script, board composition, StdPeriph drivers
-- `FreeRTOS-Kernel`, `stm32f10x-stdperiph-lib`, `STM32F4_Driver`: external RTOS/vendor code
+- `platform/stm32f4`: STM32F407 startup, linker script, board composition, StdPeriph drivers, and optional USB composite support
+- `platform/stm32f4/usb`: TinyUSB-based STM32F4 HID keyboard + CDC composite device
+- `FreeRTOS-Kernel`, `stm32f10x-stdperiph-lib`, `STM32F4_Driver`, `external/tinyusb`: external RTOS/vendor/USB stack code
 
 ## STM32F1 Hardware Mapping
 
@@ -32,14 +33,33 @@ STM32 FreeRTOS firmware using a manager-based C++ architecture with target-selec
 | PA10 | USART1 RX, 115200 8N1, GPIO AF7 |
 | PA6 | TIM3 CH1 encoder A, GPIO AF2 |
 | PA7 | TIM3 CH2 encoder B, GPIO AF2 |
+| PA11 | USB OTG FS DM, GPIO AF10, optional USB composite builds |
+| PA12 | USB OTG FS DP, GPIO AF10, optional USB composite builds |
 
 The STM32F407 linker script uses 1 MB FLASH at `0x08000000`, 128 KB RAM at
 `0x20000000`, and 64 KB CCMRAM at `0x10000000`.
 
-## UART Service Mode
+## Host Interface
 
-USART1 accepts newline-terminated ASCII at 115200 8N1. Configuration commands
-are only accepted in service mode.
+The default host interface is USART1 on both STM32F1 and STM32F4. STM32F4 can
+also be built as a USB composite device, but that path is opt-in so legacy UART
+behavior stays unchanged unless explicitly enabled.
+
+| Build mode | Host-facing interfaces | Notes |
+| --- | --- | --- |
+| Default | USART1 service console | Current legacy behavior. |
+| `ADAS_USB_COMPOSITE=ON` | USB HID keyboard + one CDC data COM | No service COM is exposed. |
+| `ADAS_USB_COMPOSITE=ON`, `ADAS_USB_EXTRA_SERVICE_CDC=ON` | USB HID keyboard + data CDC + service CDC | Exposes a second COM port for service/config traffic. |
+
+The command language is the same on UART and CDC. In USB composite mode the data
+CDC is the normal command/data channel. When service CDC is enabled, bytes
+received on the service CDC are replied to on the service CDC; otherwise all
+responses use the data channel.
+
+## Service Mode
+
+The active host interface accepts newline-terminated ASCII commands. UART uses
+115200 8N1. Configuration commands are only accepted in service mode.
 
 Enter service mode:
 
@@ -76,14 +96,33 @@ STOP                      Disable motor output and clear target RPM.
 Commands are validated before changes are applied. Invalid syntax, out-of-range
 targets, or a busy application queue return an `ERR ...` response.
 
+## USB Composite Structure
+
+STM32F4 USB composite support uses TinyUSB pinned as a Git submodule at
+`external/tinyusb` tag `0.20.0`. The STM32F4 USB wrapper is task-polled from
+`InterfaceManager`, and TinyUSB is initialized after the FreeRTOS scheduler has
+started.
+
+Descriptor layout:
+
+| Function | Interfaces | Endpoints |
+| --- | --- | --- |
+| HID keyboard | `0` | IN `0x81` |
+| Data CDC COM | `1` control, `2` data | notify IN `0x82`, OUT `0x03`, IN `0x83` |
+| Optional service CDC COM | `3` control, `4` data | notify IN `0x84`, OUT `0x05`, IN `0x85` |
+
+The normal USB composite build does not include the service CDC descriptor or
+the `Service COM` USB string. This avoids exposing an unexpected extra COM port
+in keyboard/data mode.
+
 ## Manager Architecture
 
 `app::CEO` is the director. It receives manager events, chooses the next manager,
-routes messages, and monitors snapshots for status. It does not parse UART text,
+routes messages, and monitors snapshots for status. It does not parse host text,
 validate parameters, compute PID output, read encoder hardware, or generate PWM.
 
-- `InterfaceManager`: UART service mode, command parsing, parameter validation,
-  runtime config shadow, and UART responses.
+- `InterfaceManager`: host service mode, command parsing, parameter validation,
+  runtime config shadow, and UART/CDC responses.
 - `EncoderManager`: TIM3 encoder handling, direction, pulse count, RPM, and
   diagnostics data.
 - `PidManager`: target RPM, PID gains, anti-windup, output limits, soft-start,
@@ -128,7 +167,7 @@ Flash/EEPROM backend can replace the volatile shadow later.
 - Service mode: successful setting commands blink PC13 2 times, then leave it off.
 - Service mode: invalid or failed commands blink PC13 3 times, then leave it off.
 
-## Example UART Flow
+## Example Service Flow
 
 ```text
 > SERVICE MODE
@@ -158,27 +197,39 @@ Flash/EEPROM backend can replace the volatile shadow later.
 ## Build
 
 ```bash
-make STM32_TARGET=stm32f1
-make STM32_TARGET=stm32f4
-make BUILD_TYPE=Release STM32_TARGET=stm32f1
+make stm32f1-debug
+make stm32f4-debug
+make stm32f4-release
 ```
 
-Equivalent direct CMake flow with separate build directories:
+STM32F4 USB composite builds:
 
 ```bash
-cmake -S . -Bbuild-f1 \
-  -DCMAKE_BUILD_TYPE=Debug \
-  -DCMAKE_TOOLCHAIN_FILE=gcc-arm-none-eabi.cmake \
-  -DSTM32_TARGET=stm32f1 \
-  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-cmake --build build-f1
+make stm32f4-usb-debug
+make stm32f4-usb-service-debug
+make stm32f4-usb-release
+```
 
-cmake -S . -Bbuild-f4 \
+Equivalent direct CMake flow:
+
+```bash
+cmake -S . -Bbuild/stm32f4-usb-debug \
   -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_TOOLCHAIN_FILE=gcc-arm-none-eabi.cmake \
   -DSTM32_TARGET=stm32f4 \
+  -DADAS_USB_COMPOSITE=ON \
+  -DADAS_USB_EXTRA_SERVICE_CDC=OFF \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-cmake --build build-f4
+cmake --build build/stm32f4-usb-debug
+
+cmake -S . -Bbuild/stm32f4-usb-service-debug \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_TOOLCHAIN_FILE=gcc-arm-none-eabi.cmake \
+  -DSTM32_TARGET=stm32f4 \
+  -DADAS_USB_COMPOSITE=ON \
+  -DADAS_USB_EXTRA_SERVICE_CDC=ON \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake --build build/stm32f4-usb-service-debug
 ```
 
 ## Flash
@@ -187,6 +238,6 @@ cmake --build build-f4
 make flash
 ```
 
-This writes `build/adas_mcu_dev.bin` to `0x08000000` using `st-flash`.
+This writes `${BUILD_DIR}/adas_mcu_dev.bin` to `0x08000000` using `st-flash`.
 When using a separate build directory, flash the matching `.bin` manually or
 adjust `BUILD_DIR`.
