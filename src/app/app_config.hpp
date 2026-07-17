@@ -52,7 +52,9 @@ constexpr int32_t kDefaultKd = 20;
 constexpr int32_t kPwmDutyMinPermille = 0;
 constexpr int32_t kPwmDutyMaxPermille = 1000;
 constexpr int32_t kSoftStartRampRpmPerSecond = 500;
+constexpr int32_t kFeedForwardDutyAtMaxRpm = 1000;
 
 constexpr int32_t kEncoderCountsPerRevolution = 1024;
+constexpr uint32_t kEncoderFeedbackTimeoutPeriods = 5;
 
 } // namespace app::config

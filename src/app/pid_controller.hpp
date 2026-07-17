@@ -16,6 +16,7 @@ class PidController
 {
 public:
     void configure(PidGains gains);
+    void configureFeedForward(int32_t dutyAtMaxRpm, int32_t maxRpm);
     void setOutputLimits(int32_t minOutput, int32_t maxOutput);
     void setControlPeriod(uint32_t periodMs);
     void reset();
@@ -25,13 +26,17 @@ public:
     PidGains gains() const;
 
 private:
+    int32_t calculateFeedForward(int32_t targetRpm) const;
     int32_t clampOutput(int64_t value) const;
+    int64_t clampIntegralValue(int64_t value) const;
     void clampIntegral();
 
     PidGains gains_{};
     uint32_t periodMs_ = 20;
     int32_t minOutput_ = 0;
     int32_t maxOutput_ = 1000;
+    int32_t feedForwardDutyAtMaxRpm_ = 0;
+    int32_t feedForwardMaxRpm_ = 1;
     int32_t previousActualRpm_ = 0;
     int64_t integralErrorMs_ = 0;
     int32_t output_ = 0;

@@ -7,7 +7,9 @@ ADAS_USB_COMPOSITE ?= OFF
 ADAS_USB_EXTRA_SERVICE_CDC ?= OFF
 HOST_CXX ?= c++
 HOST_TEST_DIR := build/host-tests
-HOST_TEST_BINARY := $(HOST_TEST_DIR)/interface_command_parser_test
+HOST_PARSER_TEST_BINARY := $(HOST_TEST_DIR)/interface_command_parser_test
+HOST_PID_TEST_BINARY := $(HOST_TEST_DIR)/pid_controller_test
+HOST_CONTROL_STATE_TEST_BINARY := $(HOST_TEST_DIR)/speed_control_state_machine_test
 
 all: build
 
@@ -71,8 +73,16 @@ test:
 	mkdir -p $(HOST_TEST_DIR)
 	$(HOST_CXX) -std=c++20 -Wall -Wextra -Wpedantic -Isrc -Iinclude \
 		tests/interface_command_parser_test.cpp src/app/interface_command_parser.cpp \
-		-o $(HOST_TEST_BINARY)
-	$(HOST_TEST_BINARY)
+		-o $(HOST_PARSER_TEST_BINARY)
+	$(HOST_PARSER_TEST_BINARY)
+	$(HOST_CXX) -std=c++20 -Wall -Wextra -Wpedantic -Isrc -Iinclude \
+		tests/pid_controller_test.cpp src/app/pid_controller.cpp \
+		-o $(HOST_PID_TEST_BINARY)
+	$(HOST_PID_TEST_BINARY)
+	$(HOST_CXX) -std=c++20 -Wall -Wextra -Wpedantic -Isrc -Iinclude \
+		tests/speed_control_state_machine_test.cpp src/app/speed_control_state_machine.cpp \
+		-o $(HOST_CONTROL_STATE_TEST_BINARY)
+	$(HOST_CONTROL_STATE_TEST_BINARY)
 
 SRCS := $(shell find . -name '*.[ch]' -or -name '*.[ch]pp')
 format: $(addsuffix .format,${SRCS})

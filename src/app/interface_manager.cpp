@@ -53,6 +53,28 @@ const char *directionText(RotationDirection direction)
     }
 }
 
+const char *controlStateText(SpeedControlState state)
+{
+    switch (state)
+    {
+    case SpeedControlState::AwaitingFeedback:
+        return "WAIT_FEEDBACK";
+
+    case SpeedControlState::SoftStart:
+        return "SOFT_START";
+
+    case SpeedControlState::ClosedLoop:
+        return "CLOSED_LOOP";
+
+    case SpeedControlState::FeedbackFault:
+        return "FEEDBACK_FAULT";
+
+    case SpeedControlState::Stopped:
+    default:
+        return "STOPPED";
+    }
+}
+
 void formatGain(char *buffer, size_t size, int32_t gain)
 {
     const int32_t whole = gain / config::kPidGainScale;
@@ -353,15 +375,18 @@ void InterfaceManager::sendStatusResponse(const SystemStatus &status)
     formatGain(ki, sizeof(ki), status.ki);
     formatGain(kd, sizeof(kd), status.kd);
 
-    char response[224]{};
+    char response[288]{};
     std::snprintf(response, sizeof(response),
                   "STATUS current_rpm=%ld target_rpm=%ld pwm_duty=%ld direction=%s "
-                  "kp=%s ki=%s kd=%s pid_output=%ld encoder_count=%ld controller=%s\r\n",
+                  "kp=%s ki=%s kd=%s pid_output=%ld encoder_count=%ld controller=%s "
+                  "feedback=%s control_state=%s\r\n",
                   static_cast<long>(status.currentRpm), static_cast<long>(status.targetRpm),
                   static_cast<long>(status.pwmDutyPermille), directionText(status.direction), kp,
                   ki, kd, static_cast<long>(status.pidOutput),
                   static_cast<long>(status.encoderCount),
-                  status.controllerEnabled ? "ENABLED" : "STOPPED");
+                  status.controllerEnabled ? "ENABLED" : "STOPPED",
+                  status.encoderFeedbackHealthy ? "OK" : "STALE",
+                  controlStateText(status.controlState));
     sendResponse(response);
 }
 

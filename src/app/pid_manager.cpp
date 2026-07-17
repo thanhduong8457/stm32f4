@@ -19,6 +19,7 @@ void PidManager::initialize(CEO &director)
     gains_.kd = config::kDefaultKd;
     pid_.configure(gains_);
     pid_.setOutputLimits(config::kPwmDutyMinPermille, config::kPwmDutyMaxPermille);
+    pid_.configureFeedForward(config::kFeedForwardDutyAtMaxRpm, config::kTargetRpmMax);
     status_.gains = gains_;
     setControlPeriod(config::kDefaultControlLoopPeriodMs);
     publishOutput(true);
@@ -64,6 +65,8 @@ void PidManager::processCommand(const PidCommand &command)
 
     case PidCommandType::SetActualRpm:
         actualRpm_ = command.value < 0 ? -command.value : command.value;
+        hasFeedback_ = true;
+        feedbackFresh_ = true;
         break;
 
     case PidCommandType::SetKp:
@@ -88,8 +91,11 @@ void PidManager::processCommand(const PidCommand &command)
     case PidCommandType::Reset:
         pid_.reset();
         rampedTargetRpm_ = 0;
+        controlState_.restart(targetRpm_ > 0, feedbackHealthy_, hasFeedback_);
         status_.rampedTargetRpm = 0;
         status_.outputPermille = 0;
+        status_.controlState = controlState_.state();
+        status_.enabled = controlState_.outputEnabled();
         publishOutput(true);
         break;
     }
@@ -97,6 +103,7 @@ void PidManager::processCommand(const PidCommand &command)
 
 void PidManager::setTargetRpm(int32_t targetRpm)
 {
+    const bool wasStopped = targetRpm_ == 0;
     targetRpm_ = clampTargetRpm(targetRpm);
     if (targetRpm_ == 0)
     {
@@ -104,36 +111,40 @@ void PidManager::setTargetRpm(int32_t targetRpm)
         return;
     }
 
-    if (!enabled_)
+    if (wasStopped)
     {
         pid_.reset();
         rampedTargetRpm_ = 0;
     }
-    enabled_ = true;
+    controlState_.updateInputs(true, feedbackHealthy_, hasFeedback_);
 }
 
 void PidManager::stop()
 {
-    enabled_ = false;
     targetRpm_ = 0;
     rampedTargetRpm_ = 0;
+    controlState_.updateInputs(false, feedbackHealthy_, hasFeedback_);
     pid_.reset();
     status_.targetRpm = 0;
     status_.rampedTargetRpm = 0;
     status_.outputPermille = 0;
+    status_.controlState = controlState_.state();
     status_.enabled = false;
     publishOutput(true);
 }
 
 void PidManager::runControlStep()
 {
+    updateFeedbackHealth();
     status_.targetRpm = targetRpm_;
     status_.rampedTargetRpm = rampedTargetRpm_;
     status_.actualRpm = actualRpm_;
     status_.gains = gains_;
-    status_.enabled = enabled_;
+    status_.controlState = controlState_.state();
+    status_.enabled = controlState_.outputEnabled();
+    status_.feedbackHealthy = feedbackHealthy_;
 
-    if (!enabled_)
+    if (!controlState_.outputEnabled())
     {
         status_.outputPermille = 0;
         publishOutput();
@@ -142,13 +153,46 @@ void PidManager::runControlStep()
 
     const int32_t controlTarget = nextRampedTarget();
     const int32_t pidOutput = pid_.update(controlTarget, actualRpm_);
+    controlState_.setRampComplete(controlTarget == targetRpm_);
 
     status_.targetRpm = targetRpm_;
     status_.rampedTargetRpm = controlTarget;
     status_.actualRpm = actualRpm_;
     status_.outputPermille = pidOutput;
+    status_.controlState = controlState_.state();
     status_.enabled = true;
     publishOutput();
+}
+
+void PidManager::updateFeedbackHealth()
+{
+    const bool wasHealthy = feedbackHealthy_;
+
+    if (feedbackFresh_)
+    {
+        missedFeedbackPeriods_ = 0;
+        feedbackHealthy_ = true;
+    }
+    else
+    {
+        if (missedFeedbackPeriods_ < config::kEncoderFeedbackTimeoutPeriods + 1U)
+        {
+            ++missedFeedbackPeriods_;
+        }
+        feedbackHealthy_ = hasFeedback_ &&
+                           missedFeedbackPeriods_ <= config::kEncoderFeedbackTimeoutPeriods;
+    }
+    feedbackFresh_ = false;
+
+    if (feedbackHealthy_ != wasHealthy)
+    {
+        // A fresh soft-start avoids applying stale integral or a duty step after
+        // encoder feedback disappears and later recovers.
+        pid_.reset();
+        rampedTargetRpm_ = 0;
+    }
+
+    controlState_.updateInputs(targetRpm_ > 0, feedbackHealthy_, hasFeedback_);
 }
 
 void PidManager::configurePid(PidGains gains)

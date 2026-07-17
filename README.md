@@ -127,12 +127,36 @@ validate parameters, compute PID output, read encoder hardware, or generate PWM.
   conversion, isolated from FreeRTOS and hardware for host-side testing.
 - `EncoderManager`: TIM3 encoder handling, direction, pulse count, RPM, and
   diagnostics data.
-- `PidManager`: target RPM, PID gains, anti-windup, output limits, soft-start,
-  and periodic PID computation.
+- `PidManager`: target RPM, encoder-feedback watchdog, output limits, soft-start,
+  and periodic feed-forward-assisted PID computation.
+- `SpeedControlStateMachine`: pure, host-tested state transitions for stopped,
+  feedback wait/fault, soft-start, and closed-loop operation.
 - `MotorController`: motor enable/disable and TIM4 CH4 PWM duty application.
 - `UIManager`: normal LED blink and service-mode command result indication.
 
 Managers communicate through `CEO`; they do not call each other directly.
+
+### Concepts adapted from the beta firmware
+
+The design was cross-checked against the sibling reference tree at
+`../../beta/beta/src/legoplus/framework`. The beta
+tree does not contain a reusable motor-speed PID; its relevant contribution is
+the LegoPlus component architecture described in `Framework.docx` and the
+framework interfaces.
+
+| Beta/LegoPlus idea | Implementation here |
+| --- | --- |
+| `IDirector` routes notifications between managers | `CEO` routes typed `SystemMessage` events and manager commands |
+| `IManager` / `CAQueueManager` owns a task and input queue | Each application manager owns its FreeRTOS task behavior and typed `RtosQueue` |
+| `IDriver` hides the physical device | Small `hal::` interfaces are implemented in `platform/<target>` |
+| Flash-based formal state machines | `SpeedControlStateMachine` centralizes safety transitions without RTOS or hardware dependencies |
+| Shared objects and manager status | Typed `Status`, `SystemStatus`, and `STATUS` diagnostics expose snapshots |
+| Factory/assistant selects components present in a build | `Board` and `Application` use compile-time constructor injection |
+
+The beta global singleton/factory, custom lifetime heaps, and generic shared
+object hierarchy were not copied. This firmware has a fixed, small component
+graph, so static board composition, value messages, and bounded FreeRTOS queues
+provide the same separation with less runtime state and failure surface.
 
 ## Encoder And Control Loop
 
@@ -151,12 +175,50 @@ Direction is `CW` for positive deltas, `CCW` for negative deltas, and `STOPPED`
 when no pulses arrive during the sample. The default encoder scale is
 `1024` counts per revolution in `src/app/app_config.hpp`.
 
-`PidManager` owns the deterministic speed loop. It drains PID command messages
-without blocking, runs the PID update with `vTaskDelayUntil`, soft-starts target
-RPM when enabled, and saturates output to `0..1000` duty permille. The PID
-manager publishes duty events to `CEO`, and `CEO` routes those events to
+`PidManager` owns the deterministic speed loop. It drains command messages
+without blocking, uses `vTaskDelayUntil` for a fixed control period, and ramps
+the requested RPM before applying this control law:
+
+```text
+error = ramped_target_rpm - measured_rpm
+feed_forward = ramped_target_rpm * 1000 / configured_max_rpm
+duty = clamp(feed_forward + Kp*error + Ki*integral(error) - Kd*d(measured_rpm)/dt,
+             0, 1000)
+```
+
+The linear feed-forward term supplies the approximate PWM needed for the
+requested speed; PID corrects motor/load/model error. This normally responds
+faster than error-only PID and needs less integral action. The derivative is
+taken from measured RPM, not target RPM, to avoid a derivative kick when the
+setpoint changes, and is low-pass filtered. Conditional integration prevents
+windup when PWM is saturated. For most DC motor speed loops, start with
+feed-forward + PI (`SET KD 0`) and add a small derivative term only if measurements
+are clean and damping is still needed.
+
+The controller will not enable PWM until encoder samples are arriving. If the
+feedback stream is absent for more than five control periods, it forces duty to
+zero. When feedback returns, PID state is cleared and the target restarts through
+the soft-start ramp. `STATUS` reports `feedback=OK` or `feedback=STALE` plus
+the formal `control_state`.
+
+The PID manager publishes duty events to `CEO`, and `CEO` routes those events to
 `MotorController`, which only applies motor enable/disable and PWM duty updates
-to TIM4 CH4.
+to TIM4 CH4 on PB9.
+
+### Practical tuning
+
+1. Confirm `kEncoderCountsPerRevolution` includes the quadrature multiplier and
+   any gearbox ratio used by the measured shaft.
+2. Set `kTargetRpmMax` to the measured speed near full PWM; this calibrates the
+   linear feed-forward slope.
+3. Begin with `SET KI 0` and `SET KD 0`. Increase `KP` until speed follows load changes
+   promptly without sustained oscillation, then reduce it slightly.
+4. Increase `KI` slowly until steady-state error disappears. Anti-windup protects
+   saturation, but an unnecessarily large `KI` still causes overshoot.
+5. Leave `SET KD 0` unless extra damping is necessary. If used, increase it in small
+   steps while checking encoder noise and PWM jitter.
+6. Test startup, target reductions, load steps, `STOP`, and encoder-feedback loss
+   at a current-limited supply before operating the final mechanism.
 
 `SAVE CONFIG` and `LOAD CONFIG` use `InterfaceManager`'s `ConfigurationManager`
 RAM-backed shadow store. The storage API is isolated so a target-specific
@@ -187,7 +249,7 @@ Flash/EEPROM backend can replace the volatile shadow later.
 > SET SAMPLE_TIME 20
 < OK
 > STATUS
-< STATUS current_rpm=0 target_rpm=1500 pwm_duty=0 direction=STOPPED kp=1.200 ki=0.080 kd=0.020 pid_output=0 encoder_count=0 controller=ENABLED
+< STATUS current_rpm=0 target_rpm=1500 pwm_duty=0 direction=STOPPED kp=1.200 ki=0.080 kd=0.020 pid_output=0 encoder_count=0 controller=ENABLED feedback=OK control_state=SOFT_START
 > SAVE CONFIG
 < OK
 > STOP
@@ -204,7 +266,7 @@ make stm32f4-debug
 make stm32f4-release
 ```
 
-Run the host-side command parser regression tests with:
+Run the host-side command parser, PID, and control-state regression tests with:
 
 ```bash
 make test

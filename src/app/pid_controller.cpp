@@ -11,6 +11,12 @@ void PidController::configure(PidGains gains)
     clampIntegral();
 }
 
+void PidController::configureFeedForward(int32_t dutyAtMaxRpm, int32_t maxRpm)
+{
+    feedForwardDutyAtMaxRpm_ = dutyAtMaxRpm < 0 ? 0 : dutyAtMaxRpm;
+    feedForwardMaxRpm_ = maxRpm > 0 ? maxRpm : 1;
+}
+
 void PidController::setOutputLimits(int32_t minOutput, int32_t maxOutput)
 {
     minOutput_ = minOutput;
@@ -30,8 +36,6 @@ void PidController::setControlPeriod(uint32_t periodMs)
     periodMs_ = periodMs == 0U ? 1U : periodMs;
 }
 
-void Uart1DummyPlaceholder() {} // Keep compiler happy if any placeholder needed, none here.
-
 void PidController::reset()
 {
     previousActualRpm_ = 0;
@@ -44,12 +48,8 @@ void PidController::reset()
 int32_t PidController::update(int32_t targetRpm, int32_t actualRpm)
 {
     const int32_t error = targetRpm - actualRpm;
+    const int64_t feedForward = calculateFeedForward(targetRpm);
     const int64_t pTerm = (static_cast<int64_t>(gains_.kp) * error) / config::kPidGainScale;
-
-    integralErrorMs_ += static_cast<int64_t>(error) * static_cast<int64_t>(periodMs_);
-    clampIntegral();
-    const int64_t iTerm =
-        (static_cast<int64_t>(gains_.ki) * integralErrorMs_) / (config::kPidGainScale * 1000LL);
 
     int64_t rawDTerm = 0;
     if (hasPreviousActualRpm_)
@@ -71,7 +71,28 @@ int32_t PidController::update(int32_t targetRpm, int32_t actualRpm)
 
     previousActualRpm_ = actualRpm;
     hasPreviousActualRpm_ = true;
-    output_ = clampOutput(pTerm + iTerm + filteredDTerm_);
+
+    const int64_t candidateIntegral = clampIntegralValue(
+        integralErrorMs_ + static_cast<int64_t>(error) * static_cast<int64_t>(periodMs_));
+    const int64_t candidateITerm =
+        (static_cast<int64_t>(gains_.ki) * candidateIntegral) /
+        (config::kPidGainScale * 1000LL);
+    const int64_t candidateOutput = feedForward + pTerm + candidateITerm + filteredDTerm_;
+
+    // Conditional integration lets the integral unwind at a limit, but prevents
+    // it from accumulating farther in the direction of output saturation.
+    const bool drivesOutOfHighSaturation = candidateOutput > maxOutput_ && error < 0;
+    const bool drivesOutOfLowSaturation = candidateOutput < minOutput_ && error > 0;
+    if ((candidateOutput >= minOutput_ && candidateOutput <= maxOutput_) ||
+        drivesOutOfHighSaturation || drivesOutOfLowSaturation)
+    {
+        integralErrorMs_ = candidateIntegral;
+    }
+
+    const int64_t iTerm =
+        (static_cast<int64_t>(gains_.ki) * integralErrorMs_) /
+        (config::kPidGainScale * 1000LL);
+    output_ = clampOutput(feedForward + pTerm + iTerm + filteredDTerm_);
     return output_;
 }
 
@@ -83,6 +104,20 @@ int32_t PidController::output() const
 PidGains PidController::gains() const
 {
     return gains_;
+}
+
+int32_t PidController::calculateFeedForward(int32_t targetRpm) const
+{
+    if (targetRpm <= 0 || feedForwardDutyAtMaxRpm_ == 0)
+    {
+        return 0;
+    }
+
+    const int64_t duty =
+        (static_cast<int64_t>(targetRpm) * feedForwardDutyAtMaxRpm_ +
+         (feedForwardMaxRpm_ / 2)) /
+        feedForwardMaxRpm_;
+    return clampOutput(duty);
 }
 
 int32_t PidController::clampOutput(int64_t value) const
@@ -100,25 +135,28 @@ int32_t PidController::clampOutput(int64_t value) const
 
 void PidController::clampIntegral()
 {
-    if (gains_.ki == 0)
+    integralErrorMs_ = clampIntegralValue(integralErrorMs_);
+}
+
+int64_t PidController::clampIntegralValue(int64_t value) const
+{
+    if (gains_.ki <= 0)
     {
-        integralErrorMs_ = 0;
-        return;
+        return 0;
     }
 
-    const int64_t positiveLimit =
-        (static_cast<int64_t>(maxOutput_) * config::kPidGainScale * 1000LL) / gains_.ki;
-    const int64_t negativeLimit =
-        (static_cast<int64_t>(minOutput_) * config::kPidGainScale * 1000LL) / gains_.ki;
+    const int64_t outputSpan = static_cast<int64_t>(maxOutput_) - minOutput_;
+    const int64_t limit = (outputSpan * config::kPidGainScale * 1000LL) / gains_.ki;
 
-    if (integralErrorMs_ > positiveLimit)
+    if (value > limit)
     {
-        integralErrorMs_ = positiveLimit;
+        return limit;
     }
-    else if (integralErrorMs_ < negativeLimit)
+    if (value < -limit)
     {
-        integralErrorMs_ = negativeLimit;
+        return -limit;
     }
+    return value;
 }
 
 } // namespace app

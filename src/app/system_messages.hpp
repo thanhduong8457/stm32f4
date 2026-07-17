@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "app/speed_control_state_machine.hpp"
+
 namespace app
 {
 
@@ -151,7 +153,9 @@ struct SystemStatus
     int32_t kd = 0;
     int32_t pidOutput = 0;
     int32_t encoderCount = 0;
+    SpeedControlState controlState = SpeedControlState::Stopped;
     bool controllerEnabled = false;
+    bool encoderFeedbackHealthy = false;
 };
 
 enum class InterfaceEventType : uint8_t

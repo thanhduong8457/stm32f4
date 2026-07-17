@@ -31,6 +31,7 @@ flowchart TB
         ConfigManager[app::ConfigurationManager]
         PidManager[app::PidManager]
         PidController[app::PidController]
+        SpeedState[app::SpeedControlStateMachine]
         MotorController[app::MotorController]
         EncoderManager[app::EncoderManager]
         UIManager[app::UIManager]
@@ -75,6 +76,7 @@ flowchart TB
     CEO --> Messages
     PidManager --> Messages
     PidManager --> PidController
+    PidManager --> SpeedState
     MotorController --> Messages
     EncoderManager --> Messages
 
@@ -178,9 +180,9 @@ sequenceDiagram
 
     loop every PID control period
         PIDMgr->>PIDMgr: Drain queued PID commands without blocking
-        PIDMgr->>PIDMgr: Soft-start ramp target RPM
+        PIDMgr->>PIDMgr: Check feedback watchdog and soft-start target RPM
         PIDMgr->>PID: update(ramped target RPM, actual RPM)
-        PID->>PID: Kp + Ki + Kd with anti-windup and output limits
+        PID->>PID: Feed-forward + PID correction, filtered D, anti-windup
         PID-->>PIDMgr: duty permille 0..1000
         PIDMgr->>Director: PidOutput(duty, enabled)
         Director->>Motor: MotorCommand Enable/Disable and SetDuty
@@ -228,11 +230,20 @@ stateDiagram-v2
 
     state MotorControl {
         [*] --> MotorStopped
-        MotorStopped --> SoftStart: SET RPM > 0
+        MotorStopped --> AwaitingFeedback: SET RPM > 0, no feedback seen
+        MotorStopped --> SoftStart: SET RPM > 0, feedback healthy
+        AwaitingFeedback: PWM forced to zero
+        AwaitingFeedback --> SoftStart: Fresh encoder feedback
         SoftStart --> ClosedLoop: ramped target reaches target RPM
         ClosedLoop --> ClosedLoop: Encoder feedback + PID update
+        SoftStart --> FeedbackFault: Feedback stale > 5 periods
+        ClosedLoop --> FeedbackFault: Feedback stale > 5 periods
+        FeedbackFault: PWM forced to zero, PID state reset
+        FeedbackFault --> SoftStart: Feedback recovers
         ClosedLoop --> MotorStopped: STOP or SET RPM 0
         SoftStart --> MotorStopped: STOP or SET RPM 0
+        AwaitingFeedback --> MotorStopped: STOP or SET RPM 0
+        FeedbackFault --> MotorStopped: STOP or SET RPM 0
     }
 ```
 
@@ -265,8 +276,9 @@ flowchart LR
 | `app::InterfaceManager` | Owns the UART/CDC RX queue, service-mode state, parameter validation, runtime config shadow, and responses |
 | `app::parseInterfaceCommand` | Pure host-command parser with bounded integer/fixed-point conversion; independently host-testable |
 | `app::ConfigurationManager` | Helper owned by InterfaceManager for validated active config and RAM-backed saved config shadow |
-| `app::PidManager` | Owns the periodic speed-control task, target RPM, PID gains, soft-start, anti-windup, and PID output events |
-| `app::PidController` | Pure PID math helper used only by PidManager |
+| `app::PidManager` | Owns the periodic speed-control task, target RPM, feedback watchdog, soft-start, and PWM output events |
+| `app::PidController` | Pure feed-forward-assisted PID math with filtered derivative-on-measurement, conditional anti-windup, and output limits |
+| `app::SpeedControlStateMachine` | Pure formal state owner for stopped, feedback wait/fault, soft-start, and closed-loop transitions |
 | `app::MotorController` | Owns motor enable/disable and PWM duty output policy; it performs no PID calculations |
 | `app::EncoderManager` | Samples TIM encoder counts, calculates pulse count/direction/RPM, and reports feedback to CEO |
 | `app::UIManager` | Owns normal blinking, service-mode LED-off state, and success/failure status blink patterns |
@@ -316,6 +328,79 @@ a duty event to CEO, then sleeps with `vTaskDelayUntil(controlPeriodMs)`. CEO
 routes duty events to MotorController. The UART path never performs PWM writes
 directly, MotorController performs no PID calculations, and the control loop
 does not print or send UART responses.
+
+The control output is:
+
+```text
+error = ramped_target_rpm - measured_rpm
+feed_forward = ramped_target_rpm * kFeedForwardDutyAtMaxRpm / kTargetRpmMax
+duty = clamp(feed_forward + Kp*error + Ki*integral(error) - Kd*d(measured_rpm)/dt,
+             kPwmDutyMinPermille, kPwmDutyMaxPermille)
+```
+
+The feed-forward path is a simple motor model: it maps desired RPM directly to
+an approximate steady PWM. PID is retained as the feedback correction for load,
+battery, friction, and model errors. This is preferable to error-only PID here
+because it reduces startup lag and the amount of integral required. Derivative
+uses measured RPM and an `0.2` new / `0.8` previous fixed-point low-pass filter,
+so a target step does not create a derivative kick. The integrator is symmetric
+around zero and conditionally freezes when its next step would push a saturated
+output farther into saturation.
+
+`PidManager` also supervises the encoder message stream. PWM stays disabled
+until at least one fresh RPM sample arrives. More than
+`kEncoderFeedbackTimeoutPeriods` missed control periods marks feedback stale,
+sets duty to zero, and resets PID/soft-start state. Fresh feedback automatically
+restarts control through the ramp. This watchdog detects a stopped encoder task
+or broken message path; a disconnected encoder that still produces valid zero
+samples requires separate hardware-specific stall/current protection.
+
+`SpeedControlStateMachine` owns the transitions shown in the motor-control state
+diagram. `PidManager` supplies only three facts—whether a nonzero target exists,
+whether feedback is healthy, and whether feedback has ever been seen—plus the
+soft-start ramp completion. This keeps fault/recovery policy in one pure class
+that can be tested on the host independently of FreeRTOS.
+
+## Beta/LegoPlus Concept Mapping
+
+The architecture was reviewed against the sibling reference firmware under
+`../../beta`. That firmware does not provide a motor
+PID to port. The reusable ideas come from its LegoPlus framework documentation
+and interfaces: `IDirector`, `IManager`, `CAQueueManager`, `IDriver`,
+`IDiagnostic`, `ICompAssistant`, shared objects, and the flash-based state
+machine.
+
+| LegoPlus concept | Current-project equivalent | Adaptation |
+| --- | --- | --- |
+| Director registration and notification routing | `CEO` with typed queues | Dependencies are constructor-injected instead of discovered through a singleton |
+| Manager task plus notification queue | Manager `run()` methods plus `RtosQueue<T>` | Each queue has a specific value type and bounded capacity |
+| Driver/logical-port abstraction | `hal::` interfaces and platform drivers | Interfaces are capability-sized rather than generic property bags |
+| Formal flash-based state machine | `SpeedControlStateMachine` | Transitions are explicit C++ states and host-tested; no dynamic tables are required |
+| Runtime manager status and `IDiagnostic` | `Status`, `SystemStatus`, feedback health, and `control_state` | Read-only snapshots report safety state without perturbing control |
+| Component assistants and factory | Target `Board` plus `Application` composition | The fixed build graph is resolved at compile time |
+
+The global component factory, custom permanent/semi-permanent/temporary heaps,
+and polymorphic shared-object routing are intentionally omitted. They solve
+dynamic product-family composition in beta, while this firmware benefits more
+from static allocation, explicit ownership, and compile-time type checking.
+
+## Controller Selection And Tuning
+
+The implementation supports full PID, but feed-forward + PI is the recommended
+starting point for a DC motor speed loop. Encoder differentiation amplifies
+quantization and mechanical noise, so `KD` should remain zero unless bench tests
+show that additional damping is useful.
+
+1. Set `kEncoderCountsPerRevolution` to the count seen at the controlled shaft,
+   including quadrature multiplication and gearbox ratio.
+2. Measure no-load speed near full duty and use it for `kTargetRpmMax`; adjust
+   `kFeedForwardDutyAtMaxRpm` only when full-scale allowed duty is below 1000.
+3. Tune `KP` with `KI=0`, `KD=0`; raise it to a responsive but non-oscillatory
+   value and then leave stability margin.
+4. Raise `KI` gradually to reject load-induced steady-state error.
+5. Add a small `KD` only when needed, watching RPM noise and duty jitter.
+6. Validate target steps, load steps, saturation recovery, STOP, and feedback
+   loss using a current-limited bench supply.
 
 ## Adding Hardware
 

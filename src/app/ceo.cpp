@@ -217,6 +217,8 @@ void CEO::sendStatus()
     event.status.kp = pidStatus.gains.kp;
     event.status.ki = pidStatus.gains.ki;
     event.status.kd = pidStatus.gains.kd;
+    event.status.controlState = pidStatus.controlState;
+    event.status.encoderFeedbackHealthy = pidStatus.feedbackHealthy;
     sendInterfaceEvent(event);
 }
 
