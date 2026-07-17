@@ -262,7 +262,8 @@ flowchart LR
 | --- | --- |
 | `app::Application` | Initializes managers and creates FreeRTOS tasks |
 | `app::CEO` | Orchestrates manager requests/events, routes commands, coordinates workflows, and monitors manager status snapshots |
-| `app::InterfaceManager` | Owns UART RX queue, service-mode gate, line parser, parameter validation, runtime config shadow, and UART responses |
+| `app::InterfaceManager` | Owns the UART/CDC RX queue, service-mode state, parameter validation, runtime config shadow, and responses |
+| `app::parseInterfaceCommand` | Pure host-command parser with bounded integer/fixed-point conversion; independently host-testable |
 | `app::ConfigurationManager` | Helper owned by InterfaceManager for validated active config and RAM-backed saved config shadow |
 | `app::PidManager` | Owns the periodic speed-control task, target RPM, PID gains, soft-start, anti-windup, and PID output events |
 | `app::PidController` | Pure PID math helper used only by PidManager |

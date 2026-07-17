@@ -121,8 +121,10 @@ in keyboard/data mode.
 routes messages, and monitors snapshots for status. It does not parse host text,
 validate parameters, compute PID output, read encoder hardware, or generate PWM.
 
-- `InterfaceManager`: host service mode, command parsing, parameter validation,
+- `InterfaceManager`: host transport, service-mode state, parameter validation,
   runtime config shadow, and UART/CDC responses.
+- `parseInterfaceCommand`: pure command parsing and bounded ASCII numeric
+  conversion, isolated from FreeRTOS and hardware for host-side testing.
 - `EncoderManager`: TIM3 encoder handling, direction, pulse count, RPM, and
   diagnostics data.
 - `PidManager`: target RPM, PID gains, anti-windup, output limits, soft-start,
@@ -200,6 +202,12 @@ Flash/EEPROM backend can replace the volatile shadow later.
 make stm32f1-debug
 make stm32f4-debug
 make stm32f4-release
+```
+
+Run the host-side command parser regression tests with:
+
+```bash
+make test
 ```
 
 STM32F4 USB composite builds:

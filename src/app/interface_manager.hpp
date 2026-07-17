@@ -14,6 +14,7 @@ namespace app
 {
 
 class CEO;
+struct ParsedInterfaceCommand;
 
 class InterfaceManager : public hal::IUartRxSink
 {
@@ -38,7 +39,7 @@ private:
 
     void resetPacket();
     void dispatchPacket(const char *packet);
-    void dispatchServiceCommand(const char *packet);
+    void executeCommand(const ParsedInterfaceCommand &command);
     void handleInterfaceEvent(const InterfaceEvent &event);
     void applyConfirmedCommand(const InterfaceEvent &event);
     void sendParameterResponse(ConfigParameter parameter);

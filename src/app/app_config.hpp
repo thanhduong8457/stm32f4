@@ -2,8 +2,6 @@
 
 #include <cstdint>
 
-#include "FreeRTOS.h"
-
 namespace app::config
 {
 
@@ -21,12 +19,12 @@ constexpr uint16_t kEncoderTaskStackWords = 128;
 constexpr uint16_t kPidTaskStackWords = 128;
 constexpr uint16_t kUIManagerStackWords = 64;
 
-constexpr UBaseType_t kDirectorTaskPriority = 3;
-constexpr UBaseType_t kInterfaceTaskPriority = 3;
-constexpr UBaseType_t kMotorTaskPriority = 2;
-constexpr UBaseType_t kEncoderTaskPriority = 2;
-constexpr UBaseType_t kPidTaskPriority = 3;
-constexpr UBaseType_t kUIManagerPriority = 1;
+constexpr uint32_t kDirectorTaskPriority = 3;
+constexpr uint32_t kInterfaceTaskPriority = 3;
+constexpr uint32_t kMotorTaskPriority = 2;
+constexpr uint32_t kEncoderTaskPriority = 2;
+constexpr uint32_t kPidTaskPriority = 3;
+constexpr uint32_t kUIManagerPriority = 1;
 
 constexpr uint8_t kDirectorQueueLength = 8;
 constexpr uint8_t kMotorQueueLength = 8;

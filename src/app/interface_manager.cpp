@@ -1,132 +1,18 @@
 #include "app/interface_manager.hpp"
 
-#include <cctype>
-#include <cerrno>
 #include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <limits>
 
 #include "FreeRTOS.h"
 #include "task.h"
 
 #include "app/app_config.hpp"
 #include "app/ceo.hpp"
+#include "app/interface_command_parser.hpp"
 
 namespace app
 {
 namespace
 {
-
-void trimLeadingSpaces(const char *&text)
-{
-    while (*text != '\0' && std::isspace(static_cast<unsigned char>(*text)) != 0)
-    {
-        ++text;
-    }
-}
-
-bool hasOnlyTrailingSpaces(const char *text);
-
-bool parseInteger(const char *text, int32_t &value)
-{
-    char *end = nullptr;
-    errno = 0;
-    const long parsed = std::strtol(text, &end, 10);
-    if (end == text || errno == ERANGE ||
-        parsed < static_cast<long>(std::numeric_limits<int32_t>::min()) ||
-        parsed > static_cast<long>(std::numeric_limits<int32_t>::max()))
-    {
-        return false;
-    }
-
-    while (*end != '\0')
-    {
-        if (std::isspace(static_cast<unsigned char>(*end)) == 0)
-        {
-            return false;
-        }
-        ++end;
-    }
-
-    value = static_cast<int32_t>(parsed);
-    return true;
-}
-
-bool parseFixedMilli(const char *text, int32_t &value)
-{
-    trimLeadingSpaces(text);
-
-    int64_t whole = 0;
-    bool hasDigit = false;
-    while (std::isdigit(static_cast<unsigned char>(*text)) != 0)
-    {
-        hasDigit = true;
-        whole = (whole * 10) + (*text - '0');
-        ++text;
-    }
-
-    int32_t fraction = 0;
-    int32_t scale = config::kPidGainScale / 10;
-    if (*text == '.')
-    {
-        ++text;
-        while (scale > 0 && std::isdigit(static_cast<unsigned char>(*text)) != 0)
-        {
-            hasDigit = true;
-            fraction += (*text - '0') * scale;
-            scale /= 10;
-            ++text;
-        }
-
-        if (std::isdigit(static_cast<unsigned char>(*text)) != 0)
-        {
-            return false;
-        }
-    }
-
-    if (!hasDigit || !hasOnlyTrailingSpaces(text))
-    {
-        return false;
-    }
-
-    const int64_t parsed = (whole * config::kPidGainScale) + fraction;
-    if (parsed > std::numeric_limits<int32_t>::max())
-    {
-        return false;
-    }
-
-    value = static_cast<int32_t>(parsed);
-    return true;
-}
-
-bool hasOnlyTrailingSpaces(const char *text)
-{
-    while (*text != '\0')
-    {
-        if (std::isspace(static_cast<unsigned char>(*text)) == 0)
-        {
-            return false;
-        }
-        ++text;
-    }
-
-    return true;
-}
-
-bool isCommandLine(const char *text, const char *command)
-{
-    const size_t commandLength = std::strlen(command);
-    return std::strncmp(text, command, commandLength) == 0 &&
-           hasOnlyTrailingSpaces(text + commandLength);
-}
-
-bool startsWithCommand(const char *text, const char *command)
-{
-    const size_t commandLength = std::strlen(command);
-    return std::strncmp(text, command, commandLength) == 0 &&
-           std::isspace(static_cast<unsigned char>(text[commandLength])) != 0;
-}
 
 const char *parameterName(ConfigParameter parameter)
 {
@@ -233,7 +119,7 @@ void InterfaceManager::processRx(char byte, hal::ByteStreamChannel channel)
         return;
     }
 
-    uart_.send(byte);
+    uart_.sendTo(channel, byte);
 
     if (byte == '\r' || byte == '\n')
     {
@@ -289,213 +175,84 @@ void InterfaceManager::resetPacket()
 
 void InterfaceManager::dispatchPacket(const char *packet)
 {
-    const char *cursor = packet;
-    trimLeadingSpaces(cursor);
+    executeCommand(parseInterfaceCommand(packet, serviceMode_));
+}
 
-    if (!serviceMode_)
+void InterfaceManager::executeCommand(const ParsedInterfaceCommand &command)
+{
+    switch (command.action)
     {
-        if (isCommandLine(cursor, "SERVICE MODE"))
-        {
-            serviceMode_ = true;
-            (void)sendToDirector(
-                SystemMessage{SystemCommand::ServiceModeEntered, MessageSource::Interface, 0});
-            sendResponse("OK service mode entered\r\n");
-        }
-        else
-        {
-            sendResponse("ERR service mode required\r\n");
-        }
+    case InterfaceCommandAction::EnterServiceMode:
+        serviceMode_ = true;
+        (void)sendToDirector(
+            SystemMessage{SystemCommand::ServiceModeEntered, MessageSource::Interface, 0});
+        sendResponse("OK service mode entered\r\n");
         return;
-    }
 
-    if (isCommandLine(cursor, "exit"))
-    {
+    case InterfaceCommandAction::ExitServiceMode:
         serviceMode_ = false;
         (void)sendToDirector(
             SystemMessage{SystemCommand::ServiceModeExited, MessageSource::Interface, 0});
         sendResponse("OK service mode exited\r\n");
         return;
-    }
 
-    if (isCommandLine(cursor, "SERVICE MODE"))
-    {
+    case InterfaceCommandAction::ServiceModeAlreadyActive:
         sendResponse("OK service mode active\r\n");
         return;
-    }
 
-    dispatchServiceCommand(cursor);
-}
-
-void InterfaceManager::dispatchServiceCommand(const char *packet)
-{
-    const char *cursor = packet;
-    SystemMessage message{SystemCommand::InvalidCommand, MessageSource::Interface, 0};
-    ConfigParameter parameter = ConfigParameter::TargetRpm;
-    bool hasParameter = false;
-
-    if (startsWithCommand(cursor, "SET"))
-    {
-        cursor += 3;
-        trimLeadingSpaces(cursor);
-
-        if (startsWithCommand(cursor, "RPM"))
-        {
-            cursor += 3;
-            trimLeadingSpaces(cursor);
-            if (!parseInteger(cursor, message.value))
-            {
-                sendResponse("ERR bad RPM value\r\n");
-                reportSettingFailure();
-                return;
-            }
-            message.cmd = SystemCommand::SetTargetRpm;
-            parameter = ConfigParameter::TargetRpm;
-            hasParameter = true;
-        }
-        else if (startsWithCommand(cursor, "KP"))
-        {
-            cursor += 2;
-            if (!parseFixedMilli(cursor, message.value))
-            {
-                sendResponse("ERR bad KP value\r\n");
-                reportSettingFailure();
-                return;
-            }
-            message.cmd = SystemCommand::SetKp;
-            parameter = ConfigParameter::Kp;
-            hasParameter = true;
-        }
-        else if (startsWithCommand(cursor, "KI"))
-        {
-            cursor += 2;
-            if (!parseFixedMilli(cursor, message.value))
-            {
-                sendResponse("ERR bad KI value\r\n");
-                reportSettingFailure();
-                return;
-            }
-            message.cmd = SystemCommand::SetKi;
-            parameter = ConfigParameter::Ki;
-            hasParameter = true;
-        }
-        else if (startsWithCommand(cursor, "KD"))
-        {
-            cursor += 2;
-            if (!parseFixedMilli(cursor, message.value))
-            {
-                sendResponse("ERR bad KD value\r\n");
-                reportSettingFailure();
-                return;
-            }
-            message.cmd = SystemCommand::SetKd;
-            parameter = ConfigParameter::Kd;
-            hasParameter = true;
-        }
-        else if (startsWithCommand(cursor, "SAMPLE_TIME"))
-        {
-            cursor += 11;
-            trimLeadingSpaces(cursor);
-            if (!parseInteger(cursor, message.value))
-            {
-                sendResponse("ERR bad SAMPLE_TIME value\r\n");
-                reportSettingFailure();
-                return;
-            }
-            message.cmd = SystemCommand::SetSampleTime;
-            parameter = ConfigParameter::SampleTime;
-            hasParameter = true;
-        }
-        else
-        {
-            sendResponse("ERR unsupported SET command\r\n");
-            reportSettingFailure();
-            return;
-        }
-
-        if (hasParameter && !config_.isValid(parameter, message.value))
+    case InterfaceCommandAction::SendToDirector:
+        if (command.validateParameter && !config_.isValid(command.parameter, command.message.value))
         {
             char response[64]{};
             std::snprintf(response, sizeof(response), "ERR invalid %s\r\n",
-                          parameterName(parameter));
+                          parameterName(command.parameter));
             sendResponse(response);
             reportSettingFailure();
             return;
         }
-    }
-    else if (isCommandLine(cursor, "STOP"))
-    {
-        message.cmd = SystemCommand::StopMotor;
-    }
-    else if (isCommandLine(cursor, "STATUS"))
-    {
-        message.cmd = SystemCommand::StatusRequest;
-    }
-    else if (startsWithCommand(cursor, "GET"))
-    {
-        cursor += 3;
-        trimLeadingSpaces(cursor);
-        if (isCommandLine(cursor, "RPM"))
+        if (!sendToDirector(command.message))
         {
-            sendParameterResponse(ConfigParameter::TargetRpm);
-        }
-        else if (isCommandLine(cursor, "KP"))
-        {
-            sendParameterResponse(ConfigParameter::Kp);
-        }
-        else if (isCommandLine(cursor, "KI"))
-        {
-            sendParameterResponse(ConfigParameter::Ki);
-        }
-        else if (isCommandLine(cursor, "KD"))
-        {
-            sendParameterResponse(ConfigParameter::Kd);
-        }
-        else if (isCommandLine(cursor, "SAMPLE_TIME"))
-        {
-            sendParameterResponse(ConfigParameter::SampleTime);
-        }
-        else
-        {
-            sendResponse("ERR unsupported GET command\r\n");
+            sendResponse("ERR director busy\r\n");
             reportSettingFailure();
-            return;
         }
+        return;
+
+    case InterfaceCommandAction::GetParameter:
+        sendParameterResponse(command.parameter);
         reportSettingSucceeded();
         return;
-    }
-    else if (isCommandLine(cursor, "SAVE CONFIG"))
-    {
+
+    case InterfaceCommandAction::SaveConfig:
         config_.save();
         sendResponse("OK\r\n");
         reportSettingSucceeded();
         return;
-    }
-    else if (isCommandLine(cursor, "LOAD CONFIG"))
+
+    case InterfaceCommandAction::LoadConfig:
     {
         config_.load();
         const RuntimeConfig &active = config_.active();
-        message.cmd = SystemCommand::LoadConfig;
-        message.value = active.targetRpm;
+        SystemMessage message{SystemCommand::LoadConfig, MessageSource::Interface,
+                              active.targetRpm};
         message.aux = active.gains.kp;
         message.extra = active.gains.ki;
         message.detail = active.gains.kd;
         message.detail2 = static_cast<int32_t>(active.sampleTimeMs);
-    }
-    else if (isCommandLine(cursor, "RESET PID"))
-    {
-        message.cmd = SystemCommand::ResetPid;
-    }
-    else
-    {
-        sendResponse("ERR unsupported command\r\n");
-        reportSettingFailure();
+        if (!sendToDirector(message))
+        {
+            sendResponse("ERR director busy\r\n");
+            reportSettingFailure();
+        }
         return;
     }
 
-    if (!sendToDirector(message))
-    {
-        sendResponse("ERR director busy\r\n");
-        reportSettingFailure();
+    case InterfaceCommandAction::Error:
+        sendResponse(command.response);
+        if (command.reportFailure)
+        {
+            reportSettingFailure();
+        }
+        return;
     }
 }
 
