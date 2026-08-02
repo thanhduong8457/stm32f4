@@ -1,0 +1,31 @@
+{
+  "configurations": [
+    {
+      "name": "macos-clang-arm64",
+      "includePath": [
+        "${workspaceFolder}/**"
+      ],
+      "defines": [
+        "USE_STDPERIPH_DRIVER",
+        "STM32F40_41xxx",
+        "HSE_VALUE=8000000",
+        "MY_FLAG"
+      ],
+      "intelliSenseMode": "macos-clang-arm64",
+      "cStandard": "${default}",
+      "cppStandard": "${default}",
+      "browse": {
+        "path": [
+          "${workspaceRoot}",
+          "/mnt/c/VSARM/gcc-arm-none-eabi-10.3-2021.10/arm-none-eabi/include",
+          "/mnt/c/VSARM/gcc-arm-none-eabi-10.3-2021.10/arm-none-eabi/include/c++/10.3.1"
+        ],
+        "limitSymbolsToIncludedHeaders": true,
+        "databaseFilename": "${workspaceRoot}/.vscode/browse.vc.db"
+      },
+      "configurationProvider": "ms-vscode.makefile-tools",
+      "compilerPath": "/usr/bin/clang"
+    }
+  ],
+  "version": 4
+}
