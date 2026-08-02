@@ -1,0 +1,22 @@
+{
+    "configurations": [
+        {
+            "name": "MacOS",
+            "includePath": [
+                "${workspaceRoot}",
+                "${workspaceRoot}/src",
+                "${workspaceRoot}/Drivers/STM32F4xx_StdPeriph_Driver/inc",
+                "${workspaceRoot}/Drivers/CMSIS/Include",
+                "${workspaceRoot}/Drivers/CMSIS/Device/ST/STM32F4xx/Include"
+            ],
+            "defines": [
+                "USE_STDPERIPH_DRIVER",
+                "STM32F40_41xxx",
+                "HSE_VALUE=8000000"
+            ],
+            "cStandard": "c11",
+            "cppStandard": "c++20"
+        }
+    ],
+    "version": 4
+}
