@@ -1,0 +1,9 @@
+.DS_Store
+.vscode/browse.vc.db*
+build/
+cmake-build-*/
+*.bin
+*.elf
+*.hex
+*.map
+compile_commands.json
