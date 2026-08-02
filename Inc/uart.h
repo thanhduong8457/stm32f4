@@ -75,6 +75,7 @@ extern void USART_ClearBuffer(USART_TypeDef* USARTx);
 void USART_INT_InsertToBuffer(USART_t* u, uint8_t c);
 USART_t* USART_INT_GetUsart(USART_TypeDef* USARTx);
 void clear_rx_buffer(void);
+void init_uart(void);
 void json_data_process(char *data);
 void do_something(void);
 

@@ -86,7 +86,7 @@ void USART2_IRQHandler(void){
 	if (USART_GetITStatus(USART2, USART_IT_RXNE)) {
 		//Put received data into internal buffer
 		//USART_INT_InsertToBuffer(&F4_USART2, USART2->DR);
-      	char ReceiveData = NULL;
+        char ReceiveData = '\0';
       	ReceiveData = USART_ReceiveData(USART2);
       	if(ReceiveData != '\n'){
         	rx_buffer[rx_index++] = ReceiveData;
