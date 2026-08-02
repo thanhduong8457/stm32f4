@@ -1,5 +1,0 @@
-{
-    "cortex-debug.gdbPath": "arm-none-eabi-gdb",
-    "cortex-debug.ST-LINK_gdbserver": "/usr/local/bin/stlink-server",
-    "cortex-debug.stutilPath": "st-util"
-}
