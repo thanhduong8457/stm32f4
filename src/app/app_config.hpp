@@ -1,0 +1,60 @@
+#pragma once
+
+#include <cstdint>
+
+namespace app::config
+{
+
+constexpr uint32_t kBlinkPeriodMs = 1000;
+constexpr uint32_t kServiceLedPulseMs = 100;
+constexpr uint32_t kDefaultControlLoopPeriodMs = 20;
+constexpr uint32_t kMinControlLoopPeriodMs = 5;
+constexpr uint32_t kMaxControlLoopPeriodMs = 1000;
+constexpr uint32_t kManagerQueueSendTimeoutMs = 10;
+
+constexpr uint16_t kDirectorTaskStackWords = 128;
+constexpr uint16_t kInterfaceTaskStackWords = 256;
+constexpr uint16_t kMotorTaskStackWords = 64;
+constexpr uint16_t kEncoderTaskStackWords = 128;
+constexpr uint16_t kPidTaskStackWords = 128;
+constexpr uint16_t kUIManagerStackWords = 64;
+
+constexpr uint32_t kDirectorTaskPriority = 3;
+constexpr uint32_t kInterfaceTaskPriority = 3;
+constexpr uint32_t kMotorTaskPriority = 2;
+constexpr uint32_t kEncoderTaskPriority = 2;
+constexpr uint32_t kPidTaskPriority = 3;
+constexpr uint32_t kUIManagerPriority = 1;
+
+constexpr uint8_t kDirectorQueueLength = 8;
+constexpr uint8_t kMotorQueueLength = 8;
+constexpr uint8_t kPidQueueLength = 8;
+constexpr uint8_t kEncoderQueueLength = 4;
+constexpr uint8_t kInterfaceEventQueueLength = 4;
+constexpr uint8_t kBlinkEventQueueLength = 4;
+constexpr uint8_t kInterfaceRxQueueLength = 64;
+constexpr uint8_t kInterfacePacketMaxLength = 64;
+
+constexpr uint8_t kServiceLedSuccessBlinks = 2;
+constexpr uint8_t kServiceLedFailureBlinks = 3;
+
+constexpr int32_t kTargetRpmMin = 0;
+constexpr int32_t kTargetRpmMax = 10000;
+constexpr int32_t kDefaultTargetRpm = 0;
+
+constexpr int32_t kPidGainScale = 1000;
+constexpr int32_t kPidGainMin = 0;
+constexpr int32_t kPidGainMax = 100000;
+constexpr int32_t kDefaultKp = 1200;
+constexpr int32_t kDefaultKi = 80;
+constexpr int32_t kDefaultKd = 20;
+
+constexpr int32_t kPwmDutyMinPermille = 0;
+constexpr int32_t kPwmDutyMaxPermille = 1000;
+constexpr int32_t kSoftStartRampRpmPerSecond = 500;
+constexpr int32_t kFeedForwardDutyAtMaxRpm = 1000;
+
+constexpr int32_t kEncoderCountsPerRevolution = 1024;
+constexpr uint32_t kEncoderFeedbackTimeoutPeriods = 5;
+
+} // namespace app::config

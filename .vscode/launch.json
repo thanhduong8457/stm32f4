@@ -1,0 +1,41 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug: STM32F1 ST-Link",
+            "type": "cortex-debug",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build-f1/adas_mcu_dev.elf",
+            "preLaunchTask": "Build: STM32F1",
+            "servertype": "openocd",
+            "serverpath": "openocd",
+            "gdbPath": "arm-none-eabi-gdb",
+            "device": "STM32F103C8",
+            "interface": "swd",
+            "configFiles": [
+                "interface/stlink.cfg",
+                "target/stm32f1x.cfg"
+            ],
+            "runToEntryPoint": "main"
+        },
+        {
+            "name": "Debug: STM32F4 ST-Link",
+            "type": "cortex-debug",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build-f4/adas_mcu_dev.elf",
+            "preLaunchTask": "Build: STM32F4",
+            "servertype": "openocd",
+            "serverpath": "openocd",
+            "gdbPath": "arm-none-eabi-gdb",
+            "device": "STM32F407VG",
+            "interface": "swd",
+            "configFiles": [
+                "interface/stlink.cfg",
+                "target/stm32f4x.cfg"
+            ],
+            "runToEntryPoint": "main"
+        }
+    ]
+}

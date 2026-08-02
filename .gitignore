@@ -1,15 +1,20 @@
-*.DS_Store
-*.vc.db-shm
-*.vc.db-wal
+.DS_Store
+
+# Build outputs
+build/
+build-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+*.elf
+*.hex
+*.bin
+*.map
 *.o
 *.obj
-*.hex
-*.elf
-*.vc.db
-*.pyc
-build
-FreeRTOS-Kernel
-Drivers
-STM32F4_Driver
-stm32f10x-stdperiph-lib
+*.d
 
+# Editor/local files
+.vscode/.cmake/

@@ -1,0 +1,19 @@
+{
+    "cmake.configureOnOpen": false,
+    "cmake.buildDirectory": "${workspaceFolder}/build-${variant:target}",
+    "cmake.configureArgs": [
+        "-DCMAKE_TOOLCHAIN_FILE=${workspaceFolder}/gcc-arm-none-eabi.cmake",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+    ],
+    "cortex-debug.gdbPath": "arm-none-eabi-gdb",
+    "cortex-debug.openocdPath": "openocd",
+    "cortex-debug.stutilPath": "st-util",
+    "files.associations": {
+        "freertos.h": "c",
+        "freertosconfig.h": "c",
+        "portable.h": "c",
+        "portmacro.h": "c",
+        "queue.h": "c",
+        "task.h": "c"
+    }
+}

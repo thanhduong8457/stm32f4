@@ -1,0 +1,114 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Configure: STM32F1",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-S",
+                "${workspaceFolder}",
+                "-B",
+                "${workspaceFolder}/build-f1",
+                "-DCMAKE_BUILD_TYPE=Debug",
+                "-DCMAKE_TOOLCHAIN_FILE=${workspaceFolder}/gcc-arm-none-eabi.cmake",
+                "-DSTM32_TARGET=stm32f1",
+                "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "Build: STM32F1",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build-f1"
+            ],
+            "dependsOn": "Configure: STM32F1",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Flash: STM32F1",
+            "type": "shell",
+            "command": "st-flash",
+            "args": [
+                "--reset",
+                "write",
+                "${workspaceFolder}/build-f1/adas_mcu_dev.bin",
+                "0x08000000"
+            ],
+            "dependsOn": "Build: STM32F1",
+            "problemMatcher": []
+        },
+        {
+            "label": "Configure: STM32F4",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-S",
+                "${workspaceFolder}",
+                "-B",
+                "${workspaceFolder}/build-f4",
+                "-DCMAKE_BUILD_TYPE=Debug",
+                "-DCMAKE_TOOLCHAIN_FILE=${workspaceFolder}/gcc-arm-none-eabi.cmake",
+                "-DSTM32_TARGET=stm32f4",
+                "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "Build: STM32F4",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build-f4"
+            ],
+            "dependsOn": "Configure: STM32F4",
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Flash: STM32F4",
+            "type": "shell",
+            "command": "st-flash",
+            "args": [
+                "--reset",
+                "write",
+                "${workspaceFolder}/build-f4/adas_mcu_dev.bin",
+                "0x08000000"
+            ],
+            "dependsOn": "Build: STM32F4",
+            "problemMatcher": []
+        },
+        {
+            "label": "Clean: STM32F1",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build-f1",
+                "--target",
+                "clean"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "Clean: STM32F4",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build-f4",
+                "--target",
+                "clean"
+            ],
+            "problemMatcher": []
+        }
+    ]
+}

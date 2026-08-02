@@ -1,0 +1,68 @@
+{
+    "configurations": [
+        {
+            "name": "STM32F1",
+            "compilerPath": "arm-none-eabi-g++",
+            "compileCommands": "${workspaceFolder}/build-f1/compile_commands.json",
+            "includePath": [
+                "${workspaceFolder}",
+                "${workspaceFolder}/include",
+                "${workspaceFolder}/src",
+                "${workspaceFolder}/platform",
+                "${workspaceFolder}/platform/stm32f1",
+                "${workspaceFolder}/FreeRTOS-Kernel/include",
+                "${workspaceFolder}/FreeRTOS-Kernel/portable/GCC/ARM_CM3",
+                "${workspaceFolder}/stm32f10x-stdperiph-lib/Libraries/STM32F10x_StdPeriph_Driver/inc",
+                "${workspaceFolder}/stm32f10x-stdperiph-lib/Libraries/CMSIS/CM3/DeviceSupport/ST/STM32F10x",
+                "${workspaceFolder}/stm32f10x-stdperiph-lib/Libraries/CMSIS/CM3/CoreSupport"
+            ],
+            "defines": [
+                "USE_STDPERIPH_DRIVER",
+                "STM32F103xx",
+                "STM32F10X_LD",
+                "HSE_VALUE=8000000"
+            ],
+            "compilerArgs": [
+                "-mcpu=cortex-m3",
+                "-mthumb",
+                "-msoft-float"
+            ],
+            "intelliSenseMode": "gcc-arm",
+            "cStandard": "c11",
+            "cppStandard": "c++20"
+        },
+        {
+            "name": "STM32F4",
+            "compilerPath": "arm-none-eabi-g++",
+            "compileCommands": "${workspaceFolder}/build-f4/compile_commands.json",
+            "includePath": [
+                "${workspaceFolder}",
+                "${workspaceFolder}/include",
+                "${workspaceFolder}/src",
+                "${workspaceFolder}/platform",
+                "${workspaceFolder}/platform/stm32f4",
+                "${workspaceFolder}/FreeRTOS-Kernel/include",
+                "${workspaceFolder}/FreeRTOS-Kernel/portable/GCC/ARM_CM4F",
+                "${workspaceFolder}/STM32F4_Driver/STM32F4xx_StdPeriph_Driver/inc",
+                "${workspaceFolder}/STM32F4_Driver/CMSIS/Device/ST/STM32F4xx/Include",
+                "${workspaceFolder}/STM32F4_Driver/CMSIS/Include"
+            ],
+            "defines": [
+                "USE_STDPERIPH_DRIVER",
+                "STM32F407xx",
+                "STM32F40_41xxx",
+                "HSE_VALUE=8000000"
+            ],
+            "compilerArgs": [
+                "-mcpu=cortex-m4",
+                "-mthumb",
+                "-mfpu=fpv4-sp-d16",
+                "-mfloat-abi=hard"
+            ],
+            "intelliSenseMode": "gcc-arm",
+            "cStandard": "c11",
+            "cppStandard": "c++20"
+        }
+    ],
+    "version": 4
+}
