@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "/Users/thanhduong/Documents/Embeded_Project/STM32/stm32_project/STM32_F4/MakeFileProject/src_UART",
+      "program": "/Users/thanhduong/Documents/Embeded_Project/STM32/stm32_project/STM32_F4/MakeFileProject/src_UART/build/Debug/outDebug"
+    }
+  ]
+}
