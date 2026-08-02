@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "main.h": "c",
+        "stm32f10x.h": "c",
+        "system_timetick.h": "c"
+    }
+}
